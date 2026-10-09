@@ -1,0 +1,45 @@
+x-app: &app
+  build: .
+  image: confhub:dev
+  restart: unless-stopped
+  environment: &app-env
+    CONFHUB_DATABASE: postgres
+    CONFHUB_DSN: postgres://confhub:${CONFHUB_DB_PASSWORD:?set CONFHUB_DB_PASSWORD}@db:5432/confhub?sslmode=disable
+    CONFHUB_ADMIN_PASSWORD: ${CONFHUB_ADMIN_PASSWORD:?set CONFHUB_ADMIN_PASSWORD}
+    CONFHUB_JWT_SECRET: ${CONFHUB_JWT_SECRET:?set CONFHUB_JWT_SECRET}
+  depends_on:
+    db:
+      condition: service_healthy
+  healthcheck:
+    test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health/ready"]
+    interval: 5s
+    timeout: 2s
+    retries: 3
+    start_period: 20s
+services:
+  db:
+    image: registry.cn-hangzhou.aliyuncs.com/bodesi/postgres:17
+    environment:
+      POSTGRES_DB: confhub
+      POSTGRES_USER: confhub
+      POSTGRES_PASSWORD: ${CONFHUB_DB_PASSWORD:?set CONFHUB_DB_PASSWORD}
+    volumes: ["postgres-data:/var/lib/postgresql/data"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U confhub -d confhub"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  app:
+    <<: *app
+    ports: ["${CONFHUB_PORT:-8080}:8080"]
+  app2:
+    <<: *app
+    profiles: [ha]
+    ports: ["${CONFHUB_PORT2:-8081}:8080"]
+  app3:
+    <<: *app
+    profiles: [ha]
+    ports: ["${CONFHUB_PORT3:-8082}:8080"]
+volumes:
+  postgres-data:

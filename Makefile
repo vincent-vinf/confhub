@@ -10,6 +10,17 @@ go-mod-download:
 test: go-mod-download
 	go test ./...
 
+test-unit:
+	go test ./internal/config
+
+test-integration:
+	@test -n "$(CONFHUB_TEST_POSTGRES_DSN)" || (echo "CONFHUB_TEST_POSTGRES_DSN is required"; exit 1)
+	go test -count=1 ./internal/storage ./internal/syncer ./internal/server
+
+test-race:
+	@test -n "$(CONFHUB_TEST_POSTGRES_DSN)" || (echo "CONFHUB_TEST_POSTGRES_DSN is required"; exit 1)
+	go test -race -count=1 ./...
+
 vet:
 	go vet ./...
 
@@ -28,4 +39,4 @@ docker-image-build-local:
 		--build-arg IMAGE_TAG=$(IMAGE_TAG) \
 		-t $(DOCKER_IMAGE):$(IMAGE_TAG) .
 
-.PHONY: go-mod-download test vet build run clean docker-image-build-local
+.PHONY: go-mod-download test test-unit test-integration test-race vet build run clean docker-image-build-local

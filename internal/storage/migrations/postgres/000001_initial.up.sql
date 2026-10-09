@@ -1,0 +1,13 @@
+CREATE TABLE namespaces (name VARCHAR(128) PRIMARY KEY);
+CREATE TABLE config_groups (namespace VARCHAR(128) NOT NULL, name VARCHAR(128) NOT NULL, PRIMARY KEY(namespace,name), FOREIGN KEY(namespace) REFERENCES namespaces(name));
+CREATE TABLE configs (id VARCHAR(36) PRIMARY KEY, namespace VARCHAR(128) NOT NULL, group_name VARCHAR(128) NOT NULL, name VARCHAR(128) NOT NULL, revision BIGINT NOT NULL, last_version BIGINT NOT NULL, global_version BIGINT NOT NULL, UNIQUE(namespace,group_name,name), FOREIGN KEY(namespace,group_name) REFERENCES config_groups(namespace,name));
+CREATE TABLE config_versions (config_id VARCHAR(36) NOT NULL, number BIGINT NOT NULL, content TEXT NOT NULL, format VARCHAR(16) NOT NULL, description TEXT NOT NULL, action VARCHAR(32) NOT NULL, source_version BIGINT NOT NULL, created_at BIGINT NOT NULL, PRIMARY KEY(config_id,number), FOREIGN KEY(config_id) REFERENCES configs(id) ON DELETE CASCADE);
+CREATE TABLE gray_rules (config_id VARCHAR(36) NOT NULL, id VARCHAR(36) NOT NULL, position INTEGER NOT NULL, target_version BIGINT NOT NULL, rule_json TEXT NOT NULL, PRIMARY KEY(config_id,id), FOREIGN KEY(config_id,target_version) REFERENCES config_versions(config_id,number));
+CREATE TABLE change_stream (id INTEGER PRIMARY KEY, sequence BIGINT NOT NULL, purged_through BIGINT NOT NULL);
+INSERT INTO change_stream VALUES (1,0,0);
+CREATE TABLE change_events (sequence BIGINT PRIMARY KEY, config_id VARCHAR(36) NOT NULL, namespace VARCHAR(128) NOT NULL, group_name VARCHAR(128) NOT NULL, name VARCHAR(128) NOT NULL, deleted BOOLEAN NOT NULL, created_at BIGINT NOT NULL);
+CREATE TABLE maintenance_lease (id INTEGER PRIMARY KEY, owner VARCHAR(36) NOT NULL, expires_at BIGINT NOT NULL);
+INSERT INTO maintenance_lease VALUES (1,'',0);
+CREATE TABLE admin (id INTEGER PRIMARY KEY, password_hash VARCHAR(128) NOT NULL);
+INSERT INTO namespaces VALUES ('public');
+INSERT INTO config_groups VALUES ('public','DEFAULT_GROUP');

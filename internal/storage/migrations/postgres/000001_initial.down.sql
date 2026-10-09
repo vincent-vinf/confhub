@@ -1,0 +1,9 @@
+DROP TABLE gray_rules;
+DROP TABLE config_versions;
+DROP TABLE configs;
+DROP TABLE config_groups;
+DROP TABLE namespaces;
+DROP TABLE change_events;
+DROP TABLE change_stream;
+DROP TABLE maintenance_lease;
+DROP TABLE admin;

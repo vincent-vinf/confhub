@@ -1,0 +1,47 @@
+# Use instead of compose.yaml; the application image and settings are identical.
+x-app: &app
+  build: .
+  image: confhub:dev
+  restart: unless-stopped
+  environment:
+    CONFHUB_DATABASE: mysql
+    CONFHUB_DSN: confhub:${CONFHUB_DB_PASSWORD:?set CONFHUB_DB_PASSWORD}@tcp(db:3306)/confhub
+    CONFHUB_ADMIN_PASSWORD: ${CONFHUB_ADMIN_PASSWORD:?set CONFHUB_ADMIN_PASSWORD}
+    CONFHUB_JWT_SECRET: ${CONFHUB_JWT_SECRET:?set CONFHUB_JWT_SECRET}
+  depends_on:
+    db:
+      condition: service_healthy
+  healthcheck:
+    test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health/ready"]
+    interval: 5s
+    timeout: 2s
+    retries: 3
+    start_period: 20s
+services:
+  db:
+    image: docker.m.daocloud.io/library/mysql:8.4
+    environment:
+      MYSQL_DATABASE: confhub
+      MYSQL_USER: confhub
+      MYSQL_PASSWORD: ${CONFHUB_DB_PASSWORD:?set CONFHUB_DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${CONFHUB_DB_ROOT_PASSWORD:?set CONFHUB_DB_ROOT_PASSWORD}
+    volumes: ["mysql-data:/var/lib/mysql"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_PASSWORD mysql -h 127.0.0.1 -u confhub -e 'SELECT 1' confhub >/dev/null"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+  app:
+    <<: *app
+    ports: ["${CONFHUB_PORT:-8080}:8080"]
+  app2:
+    <<: *app
+    profiles: [ha]
+    ports: ["${CONFHUB_PORT2:-8081}:8080"]
+  app3:
+    <<: *app
+    profiles: [ha]
+    ports: ["${CONFHUB_PORT3:-8082}:8080"]
+volumes:
+  mysql-data:
