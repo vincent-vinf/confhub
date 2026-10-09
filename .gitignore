@@ -1,0 +1,15 @@
+coverage.out
+.DS_Store
+.idea/
+.vscode/
+.claude/
+.agents/
+.pid
+bin/
+dist/
+log/
+storage/
+tmp/
+vendor/
+.env
+.env.*

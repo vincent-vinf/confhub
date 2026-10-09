@@ -1,0 +1,15 @@
+.git
+.gitignore
+.gitmodules
+.idea
+.vscode
+.claude
+.agents
+bin
+dist
+log
+storage
+tmp
+*.log
+coverage.out
+README.md
