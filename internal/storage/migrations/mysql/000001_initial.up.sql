@@ -4,10 +4,10 @@ CREATE TABLE configs (id VARCHAR(36) PRIMARY KEY, namespace VARCHAR(128) NOT NUL
 CREATE TABLE config_versions (config_id VARCHAR(36) NOT NULL, number BIGINT NOT NULL, content MEDIUMTEXT NOT NULL, format VARCHAR(16) NOT NULL, description TEXT NOT NULL, action VARCHAR(32) NOT NULL, source_version BIGINT NOT NULL, created_at BIGINT NOT NULL, PRIMARY KEY(config_id,number), FOREIGN KEY(config_id) REFERENCES configs(id) ON DELETE CASCADE) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 CREATE TABLE gray_rules (config_id VARCHAR(36) NOT NULL, id VARCHAR(36) NOT NULL, position INTEGER NOT NULL, target_version BIGINT NOT NULL, rule_json MEDIUMTEXT NOT NULL, PRIMARY KEY(config_id,id), FOREIGN KEY(config_id,target_version) REFERENCES config_versions(config_id,number)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 CREATE TABLE change_stream (id INTEGER PRIMARY KEY, sequence BIGINT NOT NULL, purged_through BIGINT NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
-INSERT INTO change_stream VALUES (1,0,0) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+INSERT INTO change_stream VALUES (1,0,0);
 CREATE TABLE change_events (sequence BIGINT PRIMARY KEY, config_id VARCHAR(36) NOT NULL, namespace VARCHAR(128) NOT NULL, group_name VARCHAR(128) NOT NULL, name VARCHAR(128) NOT NULL, deleted BOOLEAN NOT NULL, created_at BIGINT NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 CREATE TABLE maintenance_lease (id INTEGER PRIMARY KEY, owner VARCHAR(36) NOT NULL, expires_at BIGINT NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
-INSERT INTO maintenance_lease VALUES (1,'',0) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+INSERT INTO maintenance_lease VALUES (1,'',0);
 CREATE TABLE admin (id INTEGER PRIMARY KEY, password_hash VARCHAR(128) NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
-INSERT INTO namespaces VALUES ('public') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
-INSERT INTO config_groups VALUES ('public','DEFAULT_GROUP') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+INSERT INTO namespaces VALUES ('public');
+INSERT INTO config_groups VALUES ('public','DEFAULT_GROUP');

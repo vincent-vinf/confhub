@@ -3,6 +3,7 @@ package syncer_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -193,5 +194,148 @@ func TestExpiredLogTriggersSnapshotCompensation(t *testing.T) {
 	value, err := session.Next(readCtx)
 	if err != nil || value.Content != "after" {
 		t.Fatalf("missed retained-log gap: %+v %v", value, err)
+	}
+}
+
+func TestPendingSnapshotCannotOverrideExpiredReadDeadline(t *testing.T) {
+	store := testutil.Store(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h := syncer.New(store, syncer.Options{PollInterval: 5 * time.Millisecond, FailureTimeout: time.Second})
+	go h.Run(ctx)
+	waitReady(t, h, true)
+	session, err := h.NewSession(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	if err = session.Subscribe(ctx, config.Key{Namespace: "public", Group: "DEFAULT_GROUP", Name: "missing"}); err != nil {
+		t.Fatal(err)
+	}
+	expired, stop := context.WithDeadline(ctx, time.Now().Add(-time.Second))
+	defer stop()
+	if _, err = session.Next(expired); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("pending snapshot ignored heartbeat deadline: %v", err)
+	}
+}
+
+type blackholeSource struct {
+	syncer.Source
+	blocked atomic.Bool
+}
+
+func (s *blackholeSource) Changes(ctx context.Context, after int64, limit int) (config.Changes, error) {
+	if s.blocked.Load() {
+		<-ctx.Done()
+		return config.Changes{}, ctx.Err()
+	}
+	return s.Source.Changes(ctx, after, limit)
+}
+func TestSlowDatabaseFailureExpiresReadinessWithoutWaitingForAnotherPoll(t *testing.T) {
+	store := testutil.Store(t)
+	source := &blackholeSource{Source: store}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	failureTimeout := 200 * time.Millisecond
+	h := syncer.New(source, syncer.Options{PollInterval: 100 * time.Millisecond, FailureTimeout: failureTimeout})
+	go h.Run(ctx)
+	waitReady(t, h, true)
+	source.blocked.Store(true)
+	start := time.Now()
+	waitReady(t, h, false)
+	if elapsed := time.Since(start); elapsed > failureTimeout+150*time.Millisecond {
+		t.Fatalf("blackholed DB extended readiness: %s", elapsed)
+	}
+}
+
+type delayedReadSource struct {
+	syncer.Source
+	delay             atomic.Bool
+	captured, release chan struct{}
+}
+
+func (s *delayedReadSource) Current(ctx context.Context, k config.Key) (*config.State, int64, error) {
+	state, seq, err := s.Source.Current(ctx, k)
+	if s.delay.CompareAndSwap(true, false) {
+		close(s.captured)
+		select {
+		case <-ctx.Done():
+			return nil, 0, ctx.Err()
+		case <-s.release:
+		}
+	}
+	return state, seq, err
+}
+func TestLateInitialSnapshotCannotOverwriteNewerPublication(t *testing.T) {
+	store := testutil.Store(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	k := config.Key{Namespace: "public", Group: "DEFAULT_GROUP", Name: "service"}
+	m, err := store.Save(ctx, k, config.Edit{Content: "old", Format: "text"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := &delayedReadSource{Source: store, captured: make(chan struct{}), release: make(chan struct{})}
+	source.delay.Store(true)
+	h := syncer.New(source, syncer.Options{PollInterval: 5 * time.Millisecond, FailureTimeout: time.Second, CacheBytes: 4096})
+	go h.Run(ctx)
+	waitReady(t, h, true)
+	session, err := h.NewSession(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	subscribed := make(chan error, 1)
+	go func() { subscribed <- session.Subscribe(ctx, k) }()
+	readCtx, stop := context.WithTimeout(ctx, time.Second)
+	defer stop()
+	select {
+	case <-source.captured:
+	case <-readCtx.Done():
+		t.Fatal("initial read did not start")
+	}
+	_, err = store.Save(ctx, k, config.Edit{ExpectedID: m.State.ID, ExpectedRevision: m.State.Revision, Content: "new", Format: "text"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err := session.Next(readCtx)
+	if err != nil || value.Content != "new" {
+		t.Fatalf("new publication: %+v %v", value, err)
+	}
+	close(source.release)
+	if err = <-subscribed; err != nil {
+		t.Fatal(err)
+	}
+	quiet, quietStop := context.WithTimeout(ctx, 30*time.Millisecond)
+	defer quietStop()
+	if value, err = session.Next(quiet); err == nil {
+		t.Fatalf("late old snapshot overwrote new publication: %+v", value)
+	}
+}
+func TestSubscriptionLimitAndUnsubscribeReleaseCapacity(t *testing.T) {
+	store := testutil.Store(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h := syncer.New(store, syncer.Options{PollInterval: 5 * time.Millisecond, FailureTimeout: time.Second})
+	go h.Run(ctx)
+	waitReady(t, h, true)
+	session, err := h.NewSession(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	for i := 0; i < 10; i++ {
+		k := config.Key{Namespace: "public", Group: "DEFAULT_GROUP", Name: fmt.Sprintf("service-%d", i)}
+		if err = session.Subscribe(ctx, k); err != nil {
+			t.Fatal(err)
+		}
+	}
+	extra := config.Key{Namespace: "public", Group: "DEFAULT_GROUP", Name: "extra"}
+	if err = session.Subscribe(ctx, extra); !errors.Is(err, config.ErrInvalid) {
+		t.Fatal("subscription limit not enforced")
+	}
+	session.Unsubscribe(config.Key{Namespace: "public", Group: "DEFAULT_GROUP", Name: "service-0"})
+	if err = session.Subscribe(ctx, extra); err != nil {
+		t.Fatal("unsubscribe did not release capacity")
 	}
 }

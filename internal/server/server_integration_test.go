@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
 	"gitlab.bodesitech.com/bodesi/confhub/internal/config"
 	"gitlab.bodesitech.com/bodesi/confhub/internal/syncer"
@@ -72,6 +73,12 @@ func TestAdminAuthenticationAndSameOriginProtection(t *testing.T) {
 	changed := request("/api/admin/password", map[string]string{"old_password": "initial-password", "new_password": "updated-password"}, cookie, ts.URL)
 	if changed.StatusCode != 200 {
 		t.Fatalf("password change: %d", changed.StatusCode)
+	}
+	if updated := request("/api/admin/login", map[string]string{"username": "admin", "password": "updated-password"}, nil, ts.URL); updated.StatusCode != 200 {
+		t.Fatal("updated password cannot log in")
+	}
+	if old := request("/api/admin/login", map[string]string{"username": "admin", "password": "initial-password"}, nil, ts.URL); old.StatusCode != 401 {
+		t.Fatal("old password still accepted")
 	}
 	r, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/admin/namespaces", nil)
 	r.AddCookie(cookie)
@@ -247,5 +254,120 @@ func TestStaticPagesFallbackWithoutMaskingUnknownAPIsOrAssets(t *testing.T) {
 		if res.StatusCode != tc.status {
 			t.Fatalf("%s: got %d expected %d", tc.path, res.StatusCode, tc.status)
 		}
+	}
+}
+
+func TestAdminRejectsExpiredUnsignedAndWrongAlgorithmTokens(t *testing.T) {
+	store := testutil.Store(t)
+	secret := "0123456789abcdef0123456789abcdef"
+	app, err := server.New(store, nil, server.Options{JWTSecret: secret, JWTExpiry: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(app.Handler())
+	defer ts.Close()
+	for _, tc := range []struct {
+		name   string
+		method jwt.SigningMethod
+		claims jwt.RegisteredClaims
+		secret string
+	}{
+		{"expired", jwt.SigningMethodHS256, jwt.RegisteredClaims{Subject: "admin", Issuer: "confhub", ExpiresAt: jwt.NewNumericDate(time.Now().Add(-time.Hour))}, secret},
+		{"missing expiry", jwt.SigningMethodHS256, jwt.RegisteredClaims{Subject: "admin", Issuer: "confhub"}, secret},
+		{"wrong algorithm", jwt.SigningMethodHS512, jwt.RegisteredClaims{Subject: "admin", Issuer: "confhub", ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour))}, secret},
+		{"wrong secret", jwt.SigningMethodHS256, jwt.RegisteredClaims{Subject: "admin", Issuer: "confhub", ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour))}, "different-secret"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			token, err := jwt.NewWithClaims(tc.method, tc.claims).SignedString([]byte(tc.secret))
+			if err != nil {
+				t.Fatal(err)
+			}
+			r, _ := http.NewRequest("GET", ts.URL+"/api/admin/namespaces", nil)
+			r.AddCookie(&http.Cookie{Name: "confhub_admin", Value: token})
+			res, err := http.DefaultClient.Do(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer res.Body.Close()
+			if res.StatusCode != 401 {
+				t.Fatalf("invalid JWT accepted: %d", res.StatusCode)
+			}
+		})
+	}
+}
+
+func TestHttpPublicationOnOneReplicaPushesThroughAnother(t *testing.T) {
+	store := testutil.Store(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := store.InitializeAdmin(ctx, "initial-password"); err != nil {
+		t.Fatal(err)
+	}
+	newReplica := func() *httptest.Server {
+		t.Helper()
+		hub := syncer.New(store, syncer.Options{PollInterval: 5 * time.Millisecond, FailureTimeout: time.Second, CacheBytes: 4096})
+		go hub.Run(ctx)
+		deadline := time.Now().Add(time.Second)
+		for !hub.Ready() {
+			if time.Now().After(deadline) {
+				t.Fatal("not ready")
+			}
+			time.Sleep(time.Millisecond)
+		}
+		app, err := server.New(store, hub, server.Options{JWTSecret: "0123456789abcdef0123456789abcdef", JWTExpiry: time.Hour})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return httptest.NewServer(app.Handler())
+	}
+	admin, client := newReplica(), newReplica()
+	defer admin.Close()
+	defer client.Close()
+	u, _ := url.Parse(client.URL)
+	u.Scheme = "ws"
+	u.Path = "/api/client/watch"
+	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	k := config.Key{Namespace: "public", Group: "DEFAULT_GROUP", Name: "service"}
+	if err = conn.WriteJSON(map[string]any{"op": "subscribe", "key": k}); err != nil {
+		t.Fatal(err)
+	}
+	conn.SetReadDeadline(time.Now().Add(time.Second))
+	var missing config.Effective
+	if err = conn.ReadJSON(&missing); err != nil {
+		t.Fatal(err)
+	}
+	post := func(method, path string, body any, cookie *http.Cookie) *http.Response {
+		t.Helper()
+		raw, _ := json.Marshal(body)
+		r, _ := http.NewRequest(method, admin.URL+path, bytes.NewReader(raw))
+		r.Header.Set("Origin", admin.URL)
+		r.Header.Set("Content-Type", "application/json")
+		if cookie != nil {
+			r.AddCookie(cookie)
+		}
+		res, err := http.DefaultClient.Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { res.Body.Close() })
+		return res
+	}
+	login := post("POST", "/api/admin/login", map[string]string{"username": "admin", "password": "initial-password"}, nil)
+	cookie := login.Cookies()[0]
+	saved := post("PUT", "/api/admin/namespaces/public/groups/DEFAULT_GROUP/configs/service", map[string]any{"confirmed": true, "content": "cross-node", "format": "text"}, cookie)
+	if saved.StatusCode != 200 {
+		t.Fatalf("save: %d", saved.StatusCode)
+	}
+	conn.SetReadDeadline(time.Now().Add(time.Second))
+	var value config.Effective
+	if err = conn.ReadJSON(&value); err != nil {
+		t.Fatal(err)
+	}
+	if value.Content != "cross-node" || value.Version != 1 {
+		t.Fatalf("cross-node push: %+v", value)
 	}
 }

@@ -1,6 +1,6 @@
 # ConfHub 需求边界
 
-本文记录已经逐项确认的第一版需求边界，关键架构见 [architecture.md](architecture.md)。本阶段完成需求与架构设计，尚未实现或验证性能。
+本文记录已经逐项确认的第一版需求边界，关键架构见 [architecture.md](architecture.md)。本文为第一版需求基线；后端实现与验证状态见 [backend-implementation.md](backend-implementation.md)，性能目标尚未压测。
 
 ## 产品目标
 

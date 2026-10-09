@@ -22,6 +22,7 @@ type Options struct {
 	CacheBytes                   int64
 }
 type Hub struct {
+	lastSuccess time.Time
 	source      Source
 	options     Options
 	ready       atomic.Bool
@@ -39,6 +40,13 @@ func New(source Source, options Options) *Hub {
 	if options.FailureTimeout <= 0 {
 		options.FailureTimeout = 2 * time.Second
 	}
+	// A longer poll period cannot support the requested outage deadline.
+	if options.FailureTimeout < 2*time.Millisecond {
+		options.FailureTimeout = 2 * time.Millisecond
+	}
+	if options.PollInterval > options.FailureTimeout/2 {
+		options.PollInterval = options.FailureTimeout / 2
+	}
 	return &Hub{source: source, options: options, wake: make(chan struct{}, 1), sessions: map[*Session]struct{}{}, subscribers: map[config.Key]map[*Session]uint64{}, cache: newStateCache(options.CacheBytes)}
 }
 func (h *Hub) Ready() bool { return h.ready.Load() }
@@ -51,10 +59,12 @@ func (h *Hub) Wake() {
 func (h *Hub) Run(ctx context.Context) {
 	ticker := time.NewTicker(h.options.PollInterval)
 	defer ticker.Stop()
-	defer h.offline()
+	watchCtx, stopWatch := context.WithCancel(ctx)
+	watchDone := make(chan struct{})
+	go func() { defer close(watchDone); h.watchReadiness(watchCtx) }()
+	defer func() { stopWatch(); <-watchDone; h.offline() }()
 	cursor := int64(0)
 	initialized := false
-	var failedSince time.Time
 	for {
 		timeout := h.options.FailureTimeout / 2
 		if timeout > time.Second {
@@ -70,7 +80,7 @@ func (h *Hub) Run(ctx context.Context) {
 				h.cache.clear()
 				cursor = changes.Sequence
 				initialized = true
-				h.ready.Store(true)
+
 			} else if cursor < changes.PurgedThrough {
 				err = h.compensate(pollCtx)
 				if err == nil {
@@ -93,19 +103,16 @@ func (h *Hub) Run(ctx context.Context) {
 			}
 		}
 		cancel()
-		if err != nil {
-			if failedSince.IsZero() {
-				failedSince = time.Now()
-			}
-			if time.Since(failedSince) >= h.options.FailureTimeout {
-				h.offline()
-			}
-		} else {
-			failedSince = time.Time{}
+		if err == nil {
+			h.mu.Lock()
+			h.lastSuccess = time.Now()
+			h.ready.Store(true)
+			h.mu.Unlock()
 			if len(changes.Events) == 256 && cursor < changes.Sequence {
 				continue
 			}
 		}
+
 		select {
 		case <-ctx.Done():
 			return
@@ -186,4 +193,41 @@ func (h *Hub) NewSession(tags map[string]string) (*Session, error) {
 	s := &Session{hub: h, tags: copyTags, subscriptions: map[config.Key]uint64{}, last: map[config.Key]config.Effective{}, pending: map[config.Key]config.Effective{}, wake: make(chan struct{}, 1), done: make(chan struct{})}
 	h.sessions[s] = struct{}{}
 	return s, nil
+}
+
+// A watchdog expires readiness even while a database query is still waiting.
+// Its clock is independent of the poll ticker and query timeout.
+func (h *Hub) watchReadiness(ctx context.Context) {
+	interval := h.options.FailureTimeout / 10
+	if interval > 100*time.Millisecond {
+		interval = 100 * time.Millisecond
+	}
+	if interval <= 0 {
+		interval = time.Nanosecond
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			h.mu.Lock()
+			expired := h.Ready() && now.Sub(h.lastSuccess) >= h.options.FailureTimeout
+			sessions := []*Session{}
+			if expired {
+				h.ready.Store(false)
+				for s := range h.sessions {
+					sessions = append(sessions, s)
+				}
+			}
+			h.mu.Unlock()
+			if expired {
+				for _, s := range sessions {
+					s.Close()
+				}
+				h.cache.clear()
+			}
+		}
+	}
 }

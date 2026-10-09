@@ -26,7 +26,7 @@ make build
 
 ## 参数
 
-flag 优先于同名环境变量。不读取启动配置文件。
+flag 优先于同名环境变量。不读取启动配置文件。轮询间隔至少 1ms，同步失败时限至少 2ms；轮询间隔不能超过失败时限的一半，以保证故障检测时限。
 
 | flag | 环境变量（前缀 `CONFHUB_`） | 默认值 |
 | --- | --- | --- |
@@ -72,6 +72,8 @@ make test-integration
 make test-race
 make vet
 ```
+
+race 检查要求 CGO 和 C 编译器，`make test-race` 会显式启用 CGO；完整测试已在上述 Go 1.25 构建镜像中验证。
 
 `make test` 执行全部测试；未设置测试 DSN 时数据库测试明确 skip。`make test-integration` 和 `make test-race` 要求 DSN 存在，防止误把跳过集成测试当作通过。测试数据库 DSN 使用 PostgreSQL URL 格式。
 

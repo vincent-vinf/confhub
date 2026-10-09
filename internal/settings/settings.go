@@ -64,6 +64,12 @@ func Parse(args []string, getenv func(string) string) (Settings, error) {
 		}
 		*p = v
 	}
+	if s.PollInterval < time.Millisecond || s.SyncFailureTimeout < 2*time.Millisecond {
+		return s, fmt.Errorf("poll-interval must be at least 1ms and sync-failure-timeout at least 2ms")
+	}
+	if s.PollInterval > s.SyncFailureTimeout/2 {
+		return s, fmt.Errorf("poll-interval must not exceed half of sync-failure-timeout")
+	}
 	var err error
 	s.CacheBytes, err = strconv.ParseInt(*values["cache-bytes"], 10, 64)
 	if err != nil || s.CacheBytes < 0 {

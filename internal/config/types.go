@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 var (
@@ -32,7 +33,7 @@ func (k Key) Validate() error {
 	return nil
 }
 func ValidateName(v string) error {
-	if len(v) == 0 || len(v) > 128 || strings.TrimSpace(v) != v || strings.ContainsAny(v, "/\\\x00\r\n") {
+	if !utf8.ValidString(v) || len(v) == 0 || len(v) > 128 || strings.TrimSpace(v) != v || strings.ContainsAny(v, "/\\\x00\r\n") {
 		return fmt.Errorf("%w: names must contain 1–128 bytes without slashes or surrounding whitespace", ErrInvalid)
 	}
 	return nil

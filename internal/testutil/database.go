@@ -13,7 +13,7 @@ import (
 	"gitlab.bodesitech.com/bodesi/confhub/internal/storage"
 )
 
-func Store(t *testing.T) *storage.Store {
+func Database(t *testing.T) string {
 	t.Helper()
 	dsn := os.Getenv("CONFHUB_TEST_POSTGRES_DSN")
 	if dsn == "" {
@@ -37,6 +37,11 @@ func Store(t *testing.T) *storage.Store {
 	query.Set("search_path", schema)
 	parsed.RawQuery = query.Encode()
 	dsn = parsed.String()
+	return dsn
+}
+func Store(t *testing.T) *storage.Store {
+	t.Helper()
+	dsn := Database(t)
 	if err := storage.Migrate("postgres", dsn, false); err != nil {
 		t.Fatal(err)
 	}

@@ -126,6 +126,9 @@ func (s *Session) offer(k config.Key, generation uint64, state *config.State, se
 }
 func (s *Session) Next(ctx context.Context) (config.Effective, error) {
 	for {
+		if err := ctx.Err(); err != nil {
+			return config.Effective{}, err
+		}
 		s.mu.Lock()
 		if s.closed {
 			s.mu.Unlock()

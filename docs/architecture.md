@@ -1,6 +1,6 @@
 # ConfHub 关键架构
 
-需求边界见 [requirements.md](requirements.md)。本文汇总已经逐项明确的关键架构，具体方法签名、DDL 和依赖版本在实现阶段确定。本阶段只完成设计，不编写或运行压测流程。
+需求边界见 [requirements.md](requirements.md)。本文汇总已经逐项明确的关键架构，具体方法签名、DDL 和依赖版本在实现阶段确定。后端实现与验证状态见 [backend-implementation.md](backend-implementation.md)，不编写或运行压测流程。
 
 ## 部署与认证
 

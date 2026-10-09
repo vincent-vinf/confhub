@@ -66,6 +66,9 @@ func (s *Store) Authenticate(ctx context.Context, username, password string) err
 	return nil
 }
 func (s *Store) ChangePassword(ctx context.Context, oldPassword, newPassword string) error {
+	if len(oldPassword) > 72 {
+		return ErrUnauthorized
+	}
 	if err := validatePassword(newPassword); err != nil {
 		return err
 	}

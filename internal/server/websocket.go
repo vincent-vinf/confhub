@@ -50,7 +50,7 @@ func (s *Server) watch(c *gin.Context) {
 		return
 	}
 	defer conn.Close()
-	slog.Debug("client connected", "source_address", c.Request.RemoteAddr)
+	slog.Info("client connected", "source_address", c.Request.RemoteAddr)
 	ctx, cancel := context.WithCancel(c.Request.Context())
 	defer cancel()
 	writerDone := make(chan struct{})
@@ -92,6 +92,12 @@ func (s *Server) watch(c *gin.Context) {
 func (s *Server) writeSnapshots(ctx context.Context, conn *websocket.Conn, session *syncer.Session) {
 	nextHeartbeat := time.Now().Add(10 * time.Second)
 	for {
+		if !time.Now().Before(nextHeartbeat) {
+			if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second)); err != nil {
+				return
+			}
+			nextHeartbeat = time.Now().Add(10 * time.Second)
+		}
 		deadlineCtx, cancel := context.WithDeadline(ctx, nextHeartbeat)
 		value, err := session.Next(deadlineCtx)
 		cancel()
