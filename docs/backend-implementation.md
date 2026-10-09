@@ -14,7 +14,7 @@
 
 | 需求 / 交付 | 实现证据 | 验证证据 |
 | --- | --- | --- |
-| Gin 后端与 flag/env 启动 | `cmd/main`、`internal/settings`、`internal/server` | Go 构建/vet、三实例 Compose 启动 |
+| Gin 后端与 flag/env 启动 | `cmd/main`、`internal/settings`、`internal/server` | Go 构建/vet、三实例 Compose 启动、CLI flag 覆盖 env |
 | Namespace / Group / 配置名与默认组织 | 迁移、组织与配置管理 API | 非空组织删除拒绝、配置读写测试 |
 | 递增不可变版本、描述、原文无变化不发布 | 事务 Save、Version、History | 保存/读取/历史/no-op 测试 |
 | 全量与灰度独立目标 | Save、SetRules、Resolve | 全量保存不影响固定灰度；灰度编辑只移动规则目标 |
@@ -41,7 +41,8 @@ SDK 负责采集/覆盖 sys.ip、sys.hostname、自定义标签保留名检查�
 - `make build`、`go build ./...`、`go vet ./...`、`git diff --check` 通过。
 - 使用用户指定镜像 `registry.cn-hangzhou.aliyuncs.com/bodesi/postgres:17`，所有真实数据库测试使用独立临时 schema。
 - 完整 `go test -mod=readonly -race -count=1 -cover ./...` 通过，没有数据竞争报告。宿主机为 Go 1.27.1、关闭 CGO 且没有 gcc，因此完整 race 检查在 `registry.cn-hangzhou.aliyuncs.com/bodesi/golang:1.25`（Go 1.25.14，CGO=1）中执行，连接同一 PostgreSQL 测试实例。
-- 包覆盖率：config 77.9%，server 58.2%，storage 64.3%，syncer 82.4%。覆盖率不能替代上表的行为证据；启动与参数由部署功能检查验证。
+- 包覆盖率：config 77.9%，server 58.2%，storage 64.3%，syncer 83.9%。覆盖率不能替代上表的行为证据；启动与参数由部署功能检查验证。
+- 最终二进制 CLI 冒烟验证通过：flag 覆盖 DATABASE/DSN/LISTEN 环境变量、就绪 200、WebSocket 握手 101、默认 JSON 日志记录连接来源地址、SIGINT 优雅退出。
 - Docker 镜像构建成功；PostgreSQL 和 MySQL Compose 配置校验通过。
 - 三应用实例加 PostgreSQL 的临时 Compose 项目启动成功，三个 `/health/ready` 均为 200。实际 HTTP 检查验证共享管理 JWT、跨实例缓存收敛、全量发布保持灰度固定版本、永久删除。
 - 未执行 MySQL 集成测试、压测或性能/RSS 测量，不把资源或 P99 目标视为已验证。
