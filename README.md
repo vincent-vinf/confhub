@@ -1,8 +1,8 @@
 # ConfHub
 
-轻量配置中心后端，使用 Go/Gin、HTTP GET 与 WebSocket。支持不可变版本、全量/灰度发布、回退、乐观锁、单 admin JWT 登录，以及 PostgreSQL/MySQL 存储。
+轻量配置中心，使用 Go/Gin、React、HTTP GET 与 WebSocket。支持不可变版本、全量/灰度发布、回退、乐观锁、单 admin JWT 登录，以及 PostgreSQL/MySQL 存储。
 
-需求与架构见 [docs/requirements.md](docs/requirements.md) 和 [docs/architecture.md](docs/architecture.md)，接口见 [docs/backend-api.md](docs/backend-api.md)。当前交付为后端；React 页面和 Go/Python SDK 尚未实现。性能目标尚未压测。
+需求与架构见 [docs/requirements.md](docs/requirements.md) 和 [docs/architecture.md](docs/architecture.md)，接口见 [docs/backend-api.md](docs/backend-api.md)，控制台交互和验证见 [docs/frontend-implementation.md](docs/frontend-implementation.md)。Go/Python SDK 尚未实现。性能目标尚未压测。
 
 ## 启动
 
@@ -12,8 +12,8 @@
 export CONFHUB_DSN='postgres://confhub:password@localhost:5432/confhub?sslmode=disable'
 export CONFHUB_ADMIN_PASSWORD='initial-password'
 export CONFHUB_JWT_SECRET='replace-with-a-random-secret-of-at-least-32-bytes'
-make build
-./bin/confhub
+make frontend-install frontend-build build
+./bin/confhub --static-dir frontend/dist
 ```
 
 已有库升级需先停止旧版本或安排兼容升级，再运行同一二进制：
@@ -60,7 +60,23 @@ docker compose --profile ha up -d --build
 
 MySQL 使用 `docker compose -f compose.mysql.yaml …`，额外设置 `CONFHUB_DB_ROOT_PASSWORD`。本阶段按用户要求只运行 PostgreSQL 集成测试，MySQL 迁移/适配器尚未通过真实 MySQL 测试。
 
-Docker 构建会将可选 `frontend/dist` 目录复制到镜像的 `/app/frontend`，由 Go 服务读取，未嵌入二进制。后端阶段目录为空，API 和健康接口仍正常运行。
+Docker 多阶段构建使用 Node 24 构建 React，将产物复制到镜像的 `/app/frontend`，由 Go 服务读取，未嵌入二进制。无需提前在本机生成 `frontend/dist`；运行时无需 Node 或第二个前端 HTTP 服务。
+
+## 控制台开发
+
+使用 Node 24 和 npm；依赖版本固定在 `frontend/package-lock.json`。
+
+```sh
+make frontend-install
+# 先按启动步骤运行 Go 后端；开发时 Vite 将 API 和健康检查代理到它：
+npm --prefix frontend run dev
+# 后端不是默认 8080 时：
+CONFHUB_DEV_BACKEND=http://127.0.0.1:8081 npm --prefix frontend run dev
+```
+
+浏览器访问 `http://127.0.0.1:5173`。同源认证代理保留浏览器 Host，不开启 `changeOrigin`。登录凭据保存在 HttpOnly Cookie 中；localStorage 只保存主题偏好。
+
+控制台包含配置列表、内容编辑、发布前 diff/确认、历史查看/比较/回退、灰度规则及标签试算、命名空间/分组管理和密码修改。支持明暗主题、移动导航、JSON/YAML 可撤销格式化，以及七种配置格式高亮。
 
 ## 测试
 
@@ -71,6 +87,11 @@ export CONFHUB_TEST_POSTGRES_DSN='postgres://confhub:password@127.0.0.1:15432/co
 make test-integration
 make test-race
 make vet
+# 前端：
+make frontend-check
+npm --prefix frontend run format:check
+npm --prefix frontend exec playwright install --with-deps chromium
+make frontend-e2e
 ```
 
 race 检查要求 CGO 和 C 编译器，`make test-race` 会显式启用 CGO；完整测试已在上述 Go 1.25 构建镜像中验证。
@@ -78,3 +99,5 @@ race 检查要求 CGO 和 C 编译器，`make test-race` 会显式启用 CGO；�
 `make test` 执行全部测试；未设置测试 DSN 时数据库测试明确 skip。`make test-integration` 和 `make test-race` 要求 DSN 存在，防止误把跳过集成测试当作通过。测试数据库 DSN 使用 PostgreSQL URL 格式。
 
 测试覆盖配置保存与固定灰度、回退、并发冲突、删除重建、组织约束、历史引用与日志清理，以及 HTTP 认证/确认和 WebSocket 跨实例同步、数据库故障和日志缺口补偿。没有压测脚本或负载容器。
+
+前端端到端测试需要 Docker、Go、Node 和 Chromium，自动构建前端及 Go 服务，使用指定 PostgreSQL 17 镜像创建临时数据库，在 `127.0.0.1:18080` 测试真实 HTTP/数据库流程。数据库使用随机宿主端口，正常退出时删除测试容器；测试报告、截图及失败 trace 保存在被 Git 忽略的 `frontend/playwright-report` 和 `frontend/test-results`。Linux 截图环境需安装中文字体（例如 `fonts-noto-cjk`）。

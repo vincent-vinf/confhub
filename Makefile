@@ -31,6 +31,23 @@ build: go-mod-download
 run:
 	go run $(PACKAGE)
 
+frontend-install:
+	npm --prefix frontend ci
+
+frontend-build:
+	npm --prefix frontend run build
+
+frontend-test:
+	npm --prefix frontend test
+
+frontend-check:
+	npm --prefix frontend run typecheck
+	npm --prefix frontend test
+
+# Requires Docker and a Playwright Chromium installation. Uses a disposable DB.
+frontend-e2e:
+	npm --prefix frontend run test:e2e
+
 clean:
 	rm -rf bin
 
@@ -39,4 +56,4 @@ docker-image-build-local:
 		--build-arg IMAGE_TAG=$(IMAGE_TAG) \
 		-t $(DOCKER_IMAGE):$(IMAGE_TAG) .
 
-.PHONY: go-mod-download test test-unit test-integration test-race vet build run clean docker-image-build-local
+.PHONY: go-mod-download test test-unit test-integration test-race vet build run clean docker-image-build-local frontend-install frontend-build frontend-test frontend-check frontend-e2e

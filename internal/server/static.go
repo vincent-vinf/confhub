@@ -37,7 +37,11 @@ func (s *Server) static(c *gin.Context) {
 	}
 	file, err := root.Open(name)
 	if err != nil {
-		if path.Ext(p) != "" || p == "/assets" || strings.HasPrefix(p, "/assets/") {
+		// Configuration names commonly contain a format extension. A detail-page
+		// deep link is still an SPA route; missing asset files must remain 404.
+		parts := strings.Split(strings.Trim(p, "/"), "/")
+		configPage := len(parts) == 4 && parts[0] == "configs"
+		if (path.Ext(p) != "" && !configPage) || p == "/assets" || strings.HasPrefix(p, "/assets/") {
 			c.Status(404)
 			return
 		}

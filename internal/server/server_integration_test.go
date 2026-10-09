@@ -245,7 +245,7 @@ func TestStaticPagesFallbackWithoutMaskingUnknownAPIsOrAssets(t *testing.T) {
 	for _, tc := range []struct {
 		path   string
 		status int
-	}{{"/configs/service", 200}, {"/api/missing", 404}, {"/missing.js", 404}, {"/assets/missing", 404}, {"/api/client/missing", 404}} {
+	}{{"/configs/service", 200}, {"/configs/public/DEFAULT_GROUP/application.json", 200}, {"/configs/public/DEFAULT_GROUP/application.yaml", 200}, {"/configs/public/DEFAULT_GROUP/missing.json/asset.js", 404}, {"/api/missing", 404}, {"/missing.js", 404}, {"/assets/missing", 404}, {"/api/client/missing", 404}} {
 		res, err := http.Get(ts.URL + tc.path)
 		if err != nil {
 			t.Fatal(err)

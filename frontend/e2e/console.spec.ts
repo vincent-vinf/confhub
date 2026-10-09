@@ -1,0 +1,478 @@
+import { test, expect, type Page, type APIRequestContext } from '@playwright/test'
+import AxeBuilder from '@axe-core/playwright'
+
+const origin = 'http://127.0.0.1:18080'
+const password = 'ui-test-password'
+const path = (name: string) =>
+  `/api/admin/namespaces/public/groups/DEFAULT_GROUP/configs/${encodeURIComponent(name)}`
+const url = (name: string) => `/configs/public/DEFAULT_GROUP/${encodeURIComponent(name)}`
+async function login(page: Page) {
+  await page.goto('/configs')
+  await page.getByLabel('密码', { exact: true }).fill(password)
+  await page.getByRole('button', { name: '登录控制台' }).click()
+  await expect(page.getByRole('heading', { name: '配置管理', exact: true })).toBeVisible()
+}
+async function state(request: APIRequestContext, name: string) {
+  const response = await request.get(path(name))
+  expect(response.ok()).toBeTruthy()
+  return response.json()
+}
+async function save(
+  request: APIRequestContext,
+  name: string,
+  content: string,
+  previous?: { id: string; revision: number },
+) {
+  const response = await request.put(path(name), {
+    headers: { Origin: origin },
+    data: {
+      expected_id: previous?.id ?? '',
+      expected_revision: previous?.revision ?? 0,
+      content,
+      format: 'json',
+      description: '',
+      confirmed: true,
+    },
+  })
+  expect(response.ok()).toBeTruthy()
+  return (await response.json()).state
+}
+async function edit(page: Page, content: string) {
+  await page.getByRole('textbox', { name: '配置内容', exact: true }).fill(content)
+}
+async function confirm(page: Page, button = '确认发布') {
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByTestId('config-diff').locator('.cm-mergeView')).toBeVisible()
+  await expect(dialog.getByRole('button', { name: button, exact: true })).toBeDisabled()
+  await dialog.getByRole('checkbox').check()
+  await dialog.getByRole('button', { name: button, exact: true }).click()
+  await expect(dialog).not.toBeVisible()
+}
+async function confirmRule(page: Page) {
+  const dialog = page.getByRole('dialog')
+  await dialog.getByRole('checkbox').check()
+  await dialog.getByRole('button', { name: '确认生效', exact: true }).click()
+  await expect(dialog).not.toBeVisible()
+}
+
+test('登录失败、真实创建、语法校验、格式化撤销和保存确认', async ({ page }) => {
+  await page.goto('/configs')
+  await page.getByLabel('密码', { exact: true }).fill('wrong-password')
+  await page.getByRole('button', { name: '登录控制台' }).click()
+  await expect(page.getByRole('alert')).toContainText('用户名或密码不正确')
+  await page.getByLabel('密码', { exact: true }).fill(password)
+  await page.getByRole('button', { name: '登录控制台' }).click()
+  await page.getByRole('link', { name: '新建配置', exact: true }).click()
+  await page.getByLabel('配置名称').fill('创建-测试.json')
+  await page.getByLabel('配置格式').selectOption('json')
+  await edit(page, '{invalid')
+  await page.getByRole('button', { name: '保存并发布' }).click()
+  await expect(page.getByRole('alert')).toContainText('JSON 语法错误')
+  await expect(page.getByRole('dialog')).not.toBeVisible()
+  await edit(page, '{"enabled":true}')
+  await page.getByRole('button', { name: '格式化', exact: true }).click()
+  await expect(page.getByRole('textbox', { name: '配置内容', exact: true })).toContainText(
+    '  "enabled"',
+  )
+  await page.getByRole('textbox', { name: '配置内容', exact: true }).press('Control+z')
+  await expect(page.getByRole('textbox', { name: '配置内容', exact: true })).toHaveText(
+    '{"enabled":true}',
+  )
+  await page.getByRole('button', { name: '保存并发布' }).click()
+  await confirm(page)
+  await expect(page.getByRole('heading', { name: '创建-测试.json' })).toBeVisible()
+  expect((await state(page.request, '创建-测试.json')).global_version).toBe(1)
+  await page.reload()
+  await expect(page.getByRole('textbox', { name: '配置内容', exact: true })).toHaveText(
+    '{"enabled":true}',
+  )
+})
+
+test('历史查看、任意版本比较、切换比较保持保存基准、回退生成新版本', async ({ page }) => {
+  await login(page)
+  const name = 'history.json'
+  let s = await save(page.request, name, '{"v":1}')
+  s = await save(page.request, name, '{"v":2}', s)
+  await page.goto(url(name))
+  await edit(page, '{"v":3}')
+  await page.getByRole('button', { name: '保存并发布' }).click()
+  await page.getByLabel('对比版本', { exact: true }).selectOption('1')
+  await expect(page.getByRole('dialog')).toContainText('保存基准：r2')
+  await confirm(page)
+  await page.getByRole('tab', { name: '版本历史' }).click()
+  await page.getByRole('button', { name: '查看 v1', exact: true }).click()
+  await expect(page.getByRole('textbox', { name: '历史 v1 内容' })).toHaveText('{"v":1}')
+  await page.getByRole('button', { name: '关闭', exact: true }).click()
+  await expect(page.getByRole('button', { name: '查看 v1', exact: true })).toBeFocused()
+  await page.getByRole('button', { name: '比较 v2', exact: true }).click()
+  await page.getByLabel('左侧版本').selectOption('1')
+  await page.getByLabel('右侧版本').selectOption('3')
+  await expect(page.getByRole('textbox', { name: '对比版本内容' })).toHaveText('{"v":1}')
+  await expect(page.getByRole('textbox', { name: '待发布内容' })).toHaveText('{"v":3}')
+  await page.getByRole('button', { name: '关闭', exact: true }).click()
+  await page.getByRole('button', { name: '回退到 v1', exact: true }).click()
+  await confirm(page, '确认回退并发布')
+  s = await state(page.request, name)
+  expect(s.global_version).toBe(4)
+  expect(s.versions[4].content).toBe('{"v":1}')
+  expect(s.versions[4].source_version).toBe(1)
+  expect(s.versions[4].description).toBeTruthy()
+})
+
+test('灰度规则固定版本、定向编辑、标签试算、转为全量和规则停用删除', async ({ page }) => {
+  await login(page)
+  const name = 'gray.json'
+  let s = await save(page.request, name, '{"v":1}')
+  s = await save(page.request, name, '{"v":2}', s)
+  await page.goto(`${url(name)}?tab=rules`)
+  await page.getByRole('button', { name: '新增规则', exact: true }).click()
+  await page.getByLabel('规则名称', { exact: true }).fill('预发布')
+  await page.getByLabel('固定版本', { exact: true }).selectOption('1')
+  await page.getByLabel('条件 1 标签名称', { exact: true }).fill('env')
+  await page.getByLabel('条件 1 标签值 1', { exact: true }).fill('gray')
+  await page.getByRole('button', { name: '查看影响并确认' }).click()
+  await confirmRule(page)
+  await page.getByLabel('试算标签 1 名称').fill('env')
+  await page.getByLabel('试算标签 1 值').fill('gray')
+  await page.getByRole('button', { name: '开始试算' }).click()
+  await expect(page.locator('.simulation-version')).toHaveText('v1')
+  await page.getByRole('tab', { name: '配置内容' }).click()
+  await edit(page, '{"v":3}')
+  await page.getByRole('button', { name: '保存并发布' }).click()
+  await confirm(page)
+  s = await state(page.request, name)
+  expect(s.global_version).toBe(3)
+  expect(s.rules[0].target_version).toBe(1)
+  await page.getByLabel('编辑目标', { exact: true }).selectOption(s.rules[0].id)
+  await expect(page.getByRole('textbox', { name: '配置内容', exact: true })).toHaveText('{"v":1}')
+  await edit(page, '{"v":4}')
+  await page.getByRole('button', { name: '保存并发布' }).click()
+  await expect(page.getByRole('dialog')).toContainText('仅更新灰度规则')
+  await confirm(page)
+  s = await state(page.request, name)
+  expect(s.global_version).toBe(3)
+  expect(s.rules[0].target_version).toBe(4)
+  await page.getByRole('tab', { name: '灰度规则' }).click()
+  await page.getByRole('button', { name: '转为全量', exact: true }).click()
+  await confirm(page, '确认转为全量')
+  expect((await state(page.request, name)).global_version).toBe(5)
+  await page.getByRole('button', { name: '停用规则 预发布', exact: true }).click()
+  await confirmRule(page)
+  await page.getByRole('button', { name: '开始试算' }).click()
+  await expect(page.locator('.simulation-version')).toHaveText('v5')
+  await page.getByRole('button', { name: '删除规则 预发布', exact: true }).click()
+  await confirmRule(page)
+  expect((await state(page.request, name)).rules).toEqual([])
+})
+
+test('并发写入产生冲突，保留草稿并重取基准后重新确认', async ({ page }) => {
+  await login(page)
+  const name = 'conflict.json'
+  const old = await save(page.request, name, '{"v":1}')
+  await page.goto(url(name))
+  await edit(page, '{"v":"draft"}')
+  await save(page.request, name, '{"v":"other"}', old)
+  await page.getByRole('button', { name: '保存并发布' }).click()
+  await page.getByRole('checkbox').check()
+  await page.getByRole('button', { name: '确认发布', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('被其他人修改')
+  await page.getByRole('button', { name: '读取最新版本并重新对比' }).click()
+  await expect(page.getByRole('textbox', { name: '对比版本内容' })).toHaveText('{"v":"other"}')
+  await expect(page.getByRole('textbox', { name: '待发布内容' })).toHaveText('{"v":"draft"}')
+  await confirm(page)
+  expect((await state(page.request, name)).versions[3].content).toBe('{"v":"draft"}')
+})
+
+test('离开保护与会话过期后重新登录保留草稿', async ({ page }) => {
+  await login(page)
+  const name = 'draft.json'
+  await save(page.request, name, '{"v":1}')
+  await page.goto(url(name))
+  await edit(page, '{"v":"unsaved"}')
+  await page.getByRole('link', { name: '账号设置', exact: true }).click()
+  await expect(page.getByRole('dialog')).toContainText('离开并放弃更改')
+  await page.getByRole('button', { name: '继续编辑', exact: true }).click()
+  await page.context().clearCookies()
+  await page.getByRole('tab', { name: '版本历史' }).click()
+  await expect(page.getByRole('dialog')).toContainText('登录已过期')
+  await expect(page.getByRole('button', { name: '关闭对话框' })).not.toBeVisible()
+  await page.getByLabel('密码', { exact: true }).fill(password)
+  await page.getByRole('button', { name: '登录控制台' }).click()
+  await expect(page.getByRole('dialog')).not.toBeVisible()
+  await page.getByRole('tab', { name: '配置内容' }).click()
+  await expect(page.getByRole('textbox', { name: '配置内容', exact: true })).toHaveText(
+    '{"v":"unsaved"}',
+  )
+  await page.getByRole('link', { name: '账号设置', exact: true }).click()
+  await page.getByRole('button', { name: '放弃并离开', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '账号设置', exact: true })).toBeVisible()
+})
+
+test('组织管理拒绝非空删除，配置删除需输入名称', async ({ page }) => {
+  await login(page)
+  await page.getByRole('link', { name: '命名空间', exact: true }).click()
+  await page.getByRole('button', { name: '新建命名空间', exact: true }).click()
+  await page.getByLabel('命名空间名称', { exact: true }).fill('ui-space')
+  await page.getByRole('button', { name: '创建', exact: true }).click()
+  await page.getByRole('button', { name: '新建分组', exact: true }).click()
+  await page.getByLabel('分组名称', { exact: true }).fill('ui-group')
+  await page.getByRole('button', { name: '创建', exact: true }).click()
+  await page.getByRole('button', { name: '删除命名空间 ui-space' }).click()
+  await page.getByRole('dialog').getByRole('textbox').fill('ui-space')
+  await page.getByRole('button', { name: '确认删除', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('仍有分组或配置')
+  await page.getByRole('button', { name: '取消', exact: true }).click()
+  await page.getByRole('button', { name: '删除分组 ui-group' }).click()
+  await page.getByRole('dialog').getByRole('textbox').fill('ui-group')
+  await page.getByRole('button', { name: '确认删除', exact: true }).click()
+  await page.getByRole('button', { name: '删除命名空间 ui-space' }).click()
+  await page.getByRole('dialog').getByRole('textbox').fill('ui-space')
+  await page.getByRole('button', { name: '确认删除', exact: true }).click()
+  const name = 'delete.json'
+  await save(page.request, name, '{"v":1}')
+  await page.goto(url(name))
+  await page.getByRole('button', { name: '删除配置', exact: true }).click()
+  await expect(page.getByRole('button', { name: '永久删除', exact: true })).toBeDisabled()
+  await page.getByLabel('输入配置名称以确认').fill(name)
+  await page.getByRole('button', { name: '永久删除', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '配置管理', exact: true })).toBeVisible()
+  expect((await page.request.get(path(name))).status()).toBe(404)
+})
+
+test('密码错误不误判会话过期，修改密码并退出后重新登录', async ({ page }) => {
+  await login(page)
+  await page.getByRole('link', { name: '账号设置', exact: true }).click()
+  await page.getByLabel('当前密码', { exact: true }).fill('wrong-password')
+  await page.getByLabel('新密码', { exact: true }).fill('ui-changed-password')
+  await page.getByLabel('再次输入新密码', { exact: true }).fill('ui-changed-password')
+  await page.getByRole('button', { name: '更新密码' }).click()
+  await expect(page.getByRole('alert')).toContainText('当前密码不正确')
+  await expect(page.getByRole('dialog')).not.toBeVisible()
+  await page.getByLabel('当前密码', { exact: true }).fill(password)
+  await page.getByRole('button', { name: '更新密码' }).click()
+  await expect(page.getByLabel('当前密码', { exact: true })).toHaveValue('')
+  await page.getByRole('button', { name: '退出登录' }).click()
+  await page.getByLabel('密码', { exact: true }).fill('ui-changed-password')
+  await page.getByRole('button', { name: '登录控制台' }).click()
+  await expect(page.getByRole('heading', { name: '配置管理', exact: true })).toBeVisible()
+  expect(
+    (
+      await page.request.post('/api/admin/password', {
+        headers: { Origin: origin },
+        data: { old_password: 'ui-changed-password', new_password: password },
+      })
+    ).ok(),
+  ).toBeTruthy()
+})
+
+test('浅深主题、响应式、键盘导航与无障碍检查', async ({ page }, testInfo) => {
+  await login(page)
+  const name = 'visual.json'
+  await save(page.request, name, '{"service":"confhub","enabled":true,"retries":3}')
+  await page.goto(url(name))
+  await page.getByRole('tab', { name: '配置内容' }).focus()
+  await page.keyboard.press('ArrowRight')
+  await expect(page.getByRole('tab', { name: '版本历史' })).toBeFocused()
+  await page.keyboard.press('Home')
+  for (const dark of [false, true]) {
+    if (dark) await page.getByRole('button', { name: '切换深色主题' }).click()
+    const results = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21aa'])
+      .analyze()
+    expect(results.violations).toEqual([])
+    await page.screenshot({
+      path: testInfo.outputPath(`editor-${dark ? 'dark' : 'light'}.png`),
+      fullPage: true,
+    })
+    await page.getByRole('link', { name: '配置管理', exact: true }).click()
+    expect(
+      (await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze())
+        .violations,
+    ).toEqual([])
+    await page.goto(url(name))
+  }
+  await expect(page.getByRole('textbox', { name: '配置内容', exact: true })).toBeVisible()
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  for (const width of [375, 768, 1024, 1440]) {
+    await page.setViewportSize({ width, height: 900 })
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+      .toBe(true)
+    await page.screenshot({ path: testInfo.outputPath(`editor-${width}.png`), fullPage: true })
+  }
+  await page.setViewportSize({ width: 375, height: 812 })
+  await page.getByRole('button', { name: '打开导航' }).click()
+  await expect(page.getByRole('dialog', { name: '导航菜单' })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('button', { name: '打开导航' })).toBeFocused()
+  await edit(page, '{"service":"changed"}')
+  await page.getByRole('button', { name: '保存并发布' }).click()
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+    .toBe(true)
+  expect(
+    (await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze())
+      .violations,
+  ).toEqual([])
+  await expect
+    .poll(() =>
+      page.getByRole('dialog').evaluate((element) => element.contains(document.activeElement)),
+    )
+    .toBe(true)
+  await expect(page.locator('.cm-mergeViewEditors')).toHaveCSS('flex-direction', 'column')
+  await page.screenshot({ path: testInfo.outputPath('diff-mobile-dark.png'), fullPage: true })
+  await page.setViewportSize({ width: 812, height: 375 })
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+    .toBe(true)
+})
+
+test('多条件集合规则编辑与重排改变优先级，灰度回退保持全量和编辑草稿', async ({ page }) => {
+  await login(page)
+  const name = 'rule-order.json'
+  let s = await save(page.request, name, '{"v":1}')
+  s = await save(page.request, name, '{"v":2}', s)
+  const rules = [
+    {
+      id: 'first',
+      name: '规则一',
+      enabled: true,
+      target_version: 1,
+      conditions: [
+        { tag: 'env', operator: 'in', values: ['gray', 'staging'] },
+        { tag: 'region', operator: 'eq', values: ['east'] },
+      ],
+    },
+    {
+      id: 'second',
+      name: '规则二',
+      enabled: true,
+      target_version: 2,
+      conditions: [{ tag: 'env', operator: 'eq', values: ['gray'] }],
+    },
+  ]
+  expect(
+    (
+      await page.request.put(`${path(name)}/rules`, {
+        headers: { Origin: origin },
+        data: { expected_id: s.id, expected_revision: s.revision, rules, confirmed: true },
+      })
+    ).ok(),
+  ).toBeTruthy()
+  await page.goto(`${url(name)}?tab=rules`)
+  await page.getByLabel('试算标签 1 名称').fill('env')
+  await page.getByLabel('试算标签 1 值').fill('gray')
+  await page.getByRole('button', { name: '开始试算' }).click()
+  await expect(page.locator('.simulation-version')).toHaveText('v2')
+  await page.getByRole('button', { name: '添加标签', exact: true }).click()
+  await page.getByLabel('试算标签 2 名称').fill('region')
+  await page.getByLabel('试算标签 2 值').fill('east')
+  await page.getByRole('button', { name: '开始试算' }).click()
+  await expect(page.locator('.simulation-version')).toHaveText('v1')
+  await page.getByRole('button', { name: '上移规则 规则二', exact: true }).click()
+  await confirmRule(page)
+  await page.getByRole('button', { name: '开始试算' }).click()
+  await expect(page.locator('.simulation-version')).toHaveText('v2')
+  await page.getByRole('button', { name: '修改规则 规则一', exact: true }).click()
+  await page.getByLabel('条件 1 标签值 2', { exact: true }).fill('preview')
+  await page.getByRole('button', { name: '查看影响并确认' }).click()
+  await confirmRule(page)
+  expect((await state(page.request, name)).rules[1].conditions[0].values).toEqual([
+    'gray',
+    'preview',
+  ])
+  await page.getByRole('tab', { name: '配置内容' }).click()
+  await edit(page, '{"v":"kept draft"}')
+  await page.getByRole('tab', { name: '版本历史' }).click()
+  await page.getByLabel('回退目标', { exact: true }).selectOption('second')
+  await page.getByRole('button', { name: '回退到 v1', exact: true }).click()
+  await confirm(page, '确认回退并发布')
+  s = await state(page.request, name)
+  expect(s.global_version).toBe(2)
+  expect(s.rules[0].target_version).toBe(3)
+  await page.getByRole('tab', { name: '配置内容' }).click()
+  await expect(page.getByRole('textbox', { name: '配置内容', exact: true })).toHaveText(
+    '{"v":"kept draft"}',
+  )
+})
+
+test('删除重建的配置身份变化禁止重新确认覆盖，保留编辑内容', async ({ page }) => {
+  await login(page)
+  const name = 'recreated.json'
+  const s = await save(page.request, name, '{"v":1}')
+  await page.goto(url(name))
+  await edit(page, '{"v":"old draft"}')
+  expect(
+    (
+      await page.request.delete(path(name), {
+        headers: { Origin: origin },
+        data: { expected_id: s.id, expected_revision: s.revision, confirmed: true },
+      })
+    ).ok(),
+  ).toBeTruthy()
+  await save(page.request, name, '{"v":"new identity"}')
+  await page.getByRole('button', { name: '保存并发布' }).click()
+  await page.getByRole('checkbox').check()
+  await page.getByRole('button', { name: '确认发布', exact: true }).click()
+  await page.getByRole('button', { name: '读取最新版本并重新对比' }).click()
+  await expect(page.getByRole('alert')).toContainText('删除后重建')
+  await page.getByRole('checkbox').check()
+  await expect(page.getByRole('button', { name: '确认发布', exact: true })).toBeDisabled()
+  await page.getByRole('button', { name: '返回编辑', exact: true }).click()
+  await expect(page.getByRole('textbox', { name: '配置内容', exact: true })).toHaveText(
+    '{"v":"old draft"}',
+  )
+  expect((await state(page.request, name)).versions[1].content).toBe('{"v":"new identity"}')
+})
+
+test('YAML 多文档格式化可撤销，所有支持格式均能切换高亮', async ({ page }) => {
+  await login(page)
+  await page.getByRole('link', { name: '新建配置', exact: true }).click()
+  const text = '# docs\na: [1,2]\n---\nb: 2'
+  await edit(page, text)
+  await page.getByRole('button', { name: '格式化', exact: true }).click()
+  await expect(page.getByRole('textbox', { name: '配置内容', exact: true })).toContainText('---')
+  await page.getByRole('textbox', { name: '配置内容', exact: true }).press('Control+z')
+  await expect(page.getByRole('textbox', { name: '配置内容', exact: true })).toHaveText(text, {
+    useInnerText: true,
+  })
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  for (const [format, content] of [
+    ['toml', 'a = "test"'],
+    ['xml', '<a value="test"/>'],
+    ['properties', 'a=test'],
+    ['ini', '[main]\na=test'],
+    ['json', '{"a":"test"}'],
+    ['yaml', 'a: test'],
+  ]) {
+    await page.getByLabel('配置格式').selectOption(format)
+    await edit(page, content)
+    await expect(page.locator('.cm-line span').first()).toBeVisible()
+  }
+  await page.getByLabel('配置格式').selectOption('text')
+  await edit(page, 'plain content')
+  await expect(page.getByRole('textbox', { name: '配置内容', exact: true })).toHaveText(
+    'plain content',
+  )
+  expect(errors).toEqual([])
+})
+
+test('分组搜索涵盖分页之外的配置，失败退出可重试', async ({ page }) => {
+  await login(page)
+  for (let i = 0; i < 28; i++)
+    await save(page.request, `pagination-${String(i).padStart(2, '0')}.json`, '{"v":1}')
+  await page.getByRole('button', { name: '刷新配置列表' }).click()
+  await expect(page.locator('tbody tr')).toHaveCount(25)
+  await page.getByRole('button', { name: '下一页', exact: true }).click()
+  await expect(page.locator('tbody')).toContainText('pagination-27.json')
+  await page.getByRole('textbox', { name: '搜索本分组配置' }).fill('pagination-00')
+  await expect(page.locator('tbody tr')).toHaveCount(1)
+  await expect(page.locator('tbody')).toContainText('pagination-00.json')
+  await page.route('**/api/admin/logout', (route) => route.abort())
+  await page.getByRole('button', { name: '退出登录' }).click()
+  await expect(page.getByRole('alert')).toContainText('无法连接服务')
+  await page.unroute('**/api/admin/logout')
+  await page.getByRole('button', { name: '重试', exact: true }).click()
+  await expect(page.getByLabel('密码', { exact: true })).toBeVisible()
+})
