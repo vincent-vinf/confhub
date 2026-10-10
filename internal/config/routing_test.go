@@ -1,7 +1,7 @@
 package config_test
 
 import (
-	"gitlab.bodesitech.com/bodesi/confhub/internal/config"
+	"github.com/vincent-vinf/confhub/internal/config"
 	"testing"
 )
 

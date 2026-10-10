@@ -9,7 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"gitlab.bodesitech.com/bodesi/confhub/internal/config"
+	"github.com/vincent-vinf/confhub/internal/config"
 )
 
 func (s *Server) clients(c *gin.Context) {

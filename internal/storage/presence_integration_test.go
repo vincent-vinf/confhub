@@ -3,8 +3,8 @@ package storage_test
 import (
 	"context"
 	"fmt"
-	"gitlab.bodesitech.com/bodesi/confhub/internal/clientinfo"
-	"gitlab.bodesitech.com/bodesi/confhub/internal/testutil"
+	"github.com/vincent-vinf/confhub/internal/clientinfo"
+	"github.com/vincent-vinf/confhub/internal/testutil"
 	"testing"
 	"time"
 )

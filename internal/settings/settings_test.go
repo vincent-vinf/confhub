@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"gitlab.bodesitech.com/bodesi/confhub/internal/settings"
+	"github.com/vincent-vinf/confhub/internal/settings"
 )
 
 func environment(extra map[string]string) func(string) string {

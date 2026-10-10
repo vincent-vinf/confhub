@@ -23,7 +23,7 @@ import (
 	"syscall"
 	"time"
 
-	sdk "gitlab.bodesitech.com/bodesi/confhub/sdk/go"
+	sdk "github.com/vincent-vinf/confhub/sdk/go"
 )
 
 type object = map[string]any

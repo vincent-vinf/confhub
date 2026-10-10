@@ -3,7 +3,7 @@ package main
 import (
 	"net/url"
 
-	sdk "gitlab.bodesitech.com/bodesi/confhub/sdk/go"
+	sdk "github.com/vincent-vinf/confhub/sdk/go"
 )
 
 type onlineClient struct {

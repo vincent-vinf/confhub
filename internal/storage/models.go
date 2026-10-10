@@ -3,7 +3,7 @@ package storage
 import (
 	"time"
 
-	"gitlab.bodesitech.com/bodesi/confhub/internal/config"
+	"github.com/vincent-vinf/confhub/internal/config"
 	"gorm.io/gorm"
 )
 

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"sync"
 
-	"gitlab.bodesitech.com/bodesi/confhub/internal/config"
+	"github.com/vincent-vinf/confhub/internal/config"
 	"golang.org/x/sync/singleflight"
 )
 

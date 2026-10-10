@@ -11,11 +11,11 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
-	"gitlab.bodesitech.com/bodesi/confhub/internal/clientinfo"
-	"gitlab.bodesitech.com/bodesi/confhub/internal/config"
-	"gitlab.bodesitech.com/bodesi/confhub/internal/server"
-	"gitlab.bodesitech.com/bodesi/confhub/internal/syncer"
-	"gitlab.bodesitech.com/bodesi/confhub/internal/testutil"
+	"github.com/vincent-vinf/confhub/internal/clientinfo"
+	"github.com/vincent-vinf/confhub/internal/config"
+	"github.com/vincent-vinf/confhub/internal/server"
+	"github.com/vincent-vinf/confhub/internal/syncer"
+	"github.com/vincent-vinf/confhub/internal/testutil"
 )
 
 func TestClientsAreReadOnlyAuthenticatedAndVisibleAcrossReplicas(t *testing.T) {

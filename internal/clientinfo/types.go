@@ -2,7 +2,7 @@
 package clientinfo
 
 import (
-	"gitlab.bodesitech.com/bodesi/confhub/internal/config"
+	"github.com/vincent-vinf/confhub/internal/config"
 	"time"
 )
 

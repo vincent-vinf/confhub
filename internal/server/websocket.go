@@ -11,8 +11,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
-	"gitlab.bodesitech.com/bodesi/confhub/internal/config"
-	"gitlab.bodesitech.com/bodesi/confhub/internal/syncer"
+	"github.com/vincent-vinf/confhub/internal/config"
+	"github.com/vincent-vinf/confhub/internal/syncer"
 )
 
 var wsBuffers = &sync.Pool{}

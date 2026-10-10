@@ -13,10 +13,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"gitlab.bodesitech.com/bodesi/confhub/internal/server"
-	"gitlab.bodesitech.com/bodesi/confhub/internal/settings"
-	"gitlab.bodesitech.com/bodesi/confhub/internal/storage"
-	"gitlab.bodesitech.com/bodesi/confhub/internal/syncer"
+	"github.com/vincent-vinf/confhub/internal/server"
+	"github.com/vincent-vinf/confhub/internal/settings"
+	"github.com/vincent-vinf/confhub/internal/storage"
+	"github.com/vincent-vinf/confhub/internal/syncer"
 )
 
 var version = "dev"

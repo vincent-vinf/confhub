@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	sdk "gitlab.bodesitech.com/bodesi/confhub/sdk/go"
+	sdk "github.com/vincent-vinf/confhub/sdk/go"
 )
 
 type operation struct {

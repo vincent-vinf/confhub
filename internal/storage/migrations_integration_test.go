@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"gitlab.bodesitech.com/bodesi/confhub/internal/config"
-	"gitlab.bodesitech.com/bodesi/confhub/internal/storage"
-	"gitlab.bodesitech.com/bodesi/confhub/internal/testutil"
+	"github.com/vincent-vinf/confhub/internal/config"
+	"github.com/vincent-vinf/confhub/internal/storage"
+	"github.com/vincent-vinf/confhub/internal/testutil"
 )
 
 func TestMigrationIsIdempotentAndDoesNotCloseApplicationPool(t *testing.T) {

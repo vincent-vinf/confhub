@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"gitlab.bodesitech.com/bodesi/confhub/internal/config"
-	"gitlab.bodesitech.com/bodesi/confhub/internal/storage"
-	"gitlab.bodesitech.com/bodesi/confhub/internal/syncer"
+	"github.com/vincent-vinf/confhub/internal/config"
+	"github.com/vincent-vinf/confhub/internal/storage"
+	"github.com/vincent-vinf/confhub/internal/syncer"
 )
 
 type Options struct {

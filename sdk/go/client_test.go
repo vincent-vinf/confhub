@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	confhub "gitlab.bodesitech.com/bodesi/confhub/sdk/go"
+	confhub "github.com/vincent-vinf/confhub/sdk/go"
 )
 
 type applicationTransport struct {

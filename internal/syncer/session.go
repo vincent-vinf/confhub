@@ -5,12 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
-	"gitlab.bodesitech.com/bodesi/confhub/internal/clientinfo"
+	"github.com/vincent-vinf/confhub/internal/clientinfo"
 	"sort"
 	"sync"
 	"time"
 
-	"gitlab.bodesitech.com/bodesi/confhub/internal/config"
+	"github.com/vincent-vinf/confhub/internal/config"
 )
 
 // Session holds one latest pending snapshot per subscribed key. All content

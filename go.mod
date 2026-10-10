@@ -1,4 +1,4 @@
-module gitlab.bodesitech.com/bodesi/confhub
+module github.com/vincent-vinf/confhub
 
 go 1.25
 

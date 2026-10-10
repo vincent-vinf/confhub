@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	sdk "gitlab.bodesitech.com/bodesi/confhub/sdk/go"
+	sdk "github.com/vincent-vinf/confhub/sdk/go"
 )
 
 func (r *runner) fault(action string, index int) {

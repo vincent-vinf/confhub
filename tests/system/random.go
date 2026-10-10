@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 
-	sdk "gitlab.bodesitech.com/bodesi/confhub/sdk/go"
+	sdk "github.com/vincent-vinf/confhub/sdk/go"
 )
 
 // Expected content comes from an independent operation ledger and literal tag

@@ -1,6 +1,6 @@
 # ConfHub Go SDK
 
-独立 Go 模块 `gitlab.bodesitech.com/bodesi/confhub/sdk/go`，Go 1.22+。
+独立 Go 模块 `github.com/vincent-vinf/confhub/sdk/go`，Go 1.22+。
 
 公开入口：`New(Options)`、`Get(ctx, Key)`、`Subscribe(ctx, Key, Callback)`、`Unsubscribe(Key)`、`Close(ctx)`。
 

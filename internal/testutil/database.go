@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"gitlab.bodesitech.com/bodesi/confhub/internal/storage"
+	"github.com/vincent-vinf/confhub/internal/storage"
 )
 
 func Database(t *testing.T) string {

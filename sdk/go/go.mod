@@ -1,4 +1,4 @@
-module gitlab.bodesitech.com/bodesi/confhub/sdk/go
+module github.com/vincent-vinf/confhub/sdk/go
 
 go 1.22
 

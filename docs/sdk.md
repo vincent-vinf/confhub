@@ -7,8 +7,8 @@ SDK 只读取配置，不使用 admin 账号或 JWT。需要提前在控制台�
 独立模块位于 `sdk/go`，仅依赖 gorilla/websocket，不依赖服务端内部包。当前代码尚未推送或打版本标签，可在消费项目中本地接入：
 
 ```sh
-go mod edit -require=gitlab.bodesitech.com/bodesi/confhub/sdk/go@v0.0.0
-go mod edit -replace=gitlab.bodesitech.com/bodesi/confhub/sdk/go=/path/to/confhub/sdk/go
+go mod edit -require=github.com/vincent-vinf/confhub/sdk/go@v0.0.0
+go mod edit -replace=github.com/vincent-vinf/confhub/sdk/go=/path/to/confhub/sdk/go
 go mod tidy
 ```
 
@@ -20,7 +20,7 @@ import (
     "fmt"
     "time"
 
-    confhub "gitlab.bodesitech.com/bodesi/confhub/sdk/go"
+    confhub "github.com/vincent-vinf/confhub/sdk/go"
 )
 
 func main() {

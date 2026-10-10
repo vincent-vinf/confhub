@@ -3,7 +3,7 @@ package storage
 import (
 	"context"
 
-	"gitlab.bodesitech.com/bodesi/confhub/internal/config"
+	"github.com/vincent-vinf/confhub/internal/config"
 )
 
 func (s *Store) Delete(ctx context.Context, k config.Key, id string, revision int64) (config.Mutation, error) {

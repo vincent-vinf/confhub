@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"gitlab.bodesitech.com/bodesi/confhub/internal/clientinfo"
-	"gitlab.bodesitech.com/bodesi/confhub/internal/config"
+	"github.com/vincent-vinf/confhub/internal/clientinfo"
+	"github.com/vincent-vinf/confhub/internal/config"
 	"gorm.io/gorm/clause"
 )
 
