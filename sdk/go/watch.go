@@ -37,7 +37,7 @@ func (c *Client) Subscribe(ctx context.Context, key Key, callback Callback) erro
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.closed {
+	if c.closed || c.ctx.Err() != nil {
 		return ErrClosed
 	}
 	if ctx.Err() != nil {
@@ -153,6 +153,10 @@ func (c *Client) watch() {
 		for key := range c.subscriptions {
 			keys = append(keys, key)
 		}
+		select {
+		case <-c.wake:
+		default:
+		}
 		c.mu.Unlock()
 		if len(keys) == 0 {
 			select {
@@ -162,7 +166,6 @@ func (c *Client) watch() {
 				continue
 			}
 		}
-		connected := false
 		for attempt := 0; attempt < len(c.addresses) && c.ctx.Err() == nil; attempt++ {
 			address := c.addresses[addressIndex%len(c.addresses)]
 			addressIndex++
@@ -194,7 +197,7 @@ func (c *Client) watch() {
 				}
 			}
 			c.mu.Unlock()
-			connected = true
+			connectedAt := time.Now()
 			if err == nil {
 				c.read(conn, generation)
 			}
@@ -204,7 +207,15 @@ func (c *Client) watch() {
 				c.conn = nil
 			}
 			c.mu.Unlock()
-			break
+			if time.Since(connectedAt) >= time.Second {
+				backoff = 500 * time.Millisecond
+			}
+			c.mu.Lock()
+			changed := c.generation != generation
+			c.mu.Unlock()
+			if changed {
+				break
+			}
 		}
 		c.mu.Lock()
 		changed := c.generation != generation
@@ -213,12 +224,8 @@ func (c *Client) watch() {
 			backoff = 500 * time.Millisecond
 			continue
 		}
-		// Try the next endpoint immediately after a live connection drops. If all
-		// endpoints fail, exponentially back off with jitter, capped at thirty seconds.
-		if connected {
-			backoff = 500 * time.Millisecond
-			continue
-		}
+		// Rapid-close handshakes count as failed attempts. After trying each
+		// endpoint, back off rather than spinning on successful HTTP upgrades.
 		delay := time.Duration(float64(backoff) * (0.8 + rand.Float64()*0.4))
 		if delay > 30*time.Second {
 			delay = 30 * time.Second
@@ -242,7 +249,7 @@ func (c *Client) watch() {
 }
 
 func (c *Client) read(conn *websocket.Conn, generation uint64) {
-	conn.SetReadLimit(2 << 20)
+	conn.SetReadLimit(maxWireBytes)
 	conn.SetReadDeadline(time.Now().Add(35 * time.Second))
 	conn.SetPingHandler(func(data string) error {
 		conn.SetReadDeadline(time.Now().Add(35 * time.Second))

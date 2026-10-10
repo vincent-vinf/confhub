@@ -8,6 +8,10 @@ import (
 	"unicode/utf8"
 )
 
+// JSON can expand one raw UTF-8 byte into a six-byte escape. Leave room for
+// metadata while still enforcing the protocol's decoded one-MiB content limit.
+const maxWireBytes = 8 << 20
+
 var (
 	ErrNotFound    = errors.New("confhub: configuration not found")
 	ErrUnavailable = errors.New("confhub: no available server or cached configuration")

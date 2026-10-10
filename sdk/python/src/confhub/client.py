@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 import aiohttp
 
 from .cache import DiskCache
-from .types import Closed, Key, NotFound, Snapshot, Unavailable
+from .types import MAX_WIRE_BYTES, Closed, Key, NotFound, Snapshot, Unavailable
 
 Callback = Callable[[Snapshot], Awaitable[None] | None]
 
@@ -110,7 +110,7 @@ class AsyncClient:
                     raw = bytearray()
                     async for chunk in response.content.iter_chunked(65536):
                         raw.extend(chunk)
-                        if len(raw) > 2 << 20:
+                        if len(raw) > MAX_WIRE_BYTES:
                             raise ValueError("configuration response too large")
                     value = Snapshot.from_dict(json.loads(raw))
                     if value.key != key or value.deleted != (response.status == 404):
@@ -147,10 +147,21 @@ class AsyncClient:
 
             value = replace(value, content="", format="")
         self._records[value.key] = value
-        try:
-            await asyncio.to_thread(self._disk.write, value)
-        except OSError as error:
-            self._report(error)
+        transaction = asyncio.create_task(asyncio.to_thread(self._disk.write, value))
+        cancelled = False
+        while True:
+            try:
+                await asyncio.shield(transaction)
+                break
+            except asyncio.CancelledError:
+                # An OS write can't be cancelled. Keep the state lock across
+                # repeated cancellation until its atomic transaction finishes.
+                cancelled = True
+            except OSError as error:
+                self._report(error)
+                break
+        if cancelled:
+            raise asyncio.CancelledError
         return value
 
     async def _accept(self, value: Snapshot) -> Snapshot:
@@ -167,7 +178,10 @@ class AsyncClient:
                     raise NotFound(value)
                 return value.with_source("memory")
             disk = await asyncio.to_thread(self._disk.read, key)
+            if self._closed:
+                raise Closed("client closed")
             if disk is not None:
+                self._records[key] = disk
                 return disk
         raise Unavailable("no available server or cached configuration")
 
@@ -187,6 +201,10 @@ class AsyncClient:
             await self._ws.close()
         if self._session is not None:
             await self._session.close()
+        # External get() callers may still be committing a cache transaction.
+        # Wait for its ordering lock rather than letting writes escape shutdown.
+        async with self._lock:
+            pass
 
     async def subscribe(self, key: Key, callback: Callback) -> None:
         if not callable(callback):
@@ -267,15 +285,15 @@ class AsyncClient:
             if not keys:
                 await self._wake.wait()
                 continue
-            connected = False
             for _ in self._addresses:
                 address = self._addresses[index % len(self._addresses)]
                 index += 1
                 try:
+                    connected_at = asyncio.get_running_loop().time()
                     async with session.ws_connect(
                         address + "/api/client/watch",
                         params={"tags": self._tags},
-                        max_msg_size=2 << 20,
+                        max_msg_size=MAX_WIRE_BYTES,
                         timeout=aiohttp.ClientWSTimeout(ws_receive=35, ws_close=self._timeout),
                     ) as ws:
                         async with self._lock:
@@ -284,7 +302,6 @@ class AsyncClient:
                             self._ws = ws
                             for key in keys:
                                 await ws.send_json({"op": "subscribe", "key": key.to_dict()})
-                        connected = True
                         async for message in ws:
                             if message.type != aiohttp.WSMsgType.TEXT:
                                 break
@@ -300,14 +317,17 @@ class AsyncClient:
                                 if sub is not None:
                                     accepted = await self._accept_locked(value)
                                     self._enqueue(sub, accepted)
-                    break
+                    if asyncio.get_running_loop().time() - connected_at >= 1:
+                        backoff = 0.5
+                    if self._generation != generation:
+                        break
                 except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, OSError):
                     continue
                 finally:
                     self._ws = None
             if self._closed:
                 return
-            if self._generation != generation or connected:
+            if self._generation != generation:
                 backoff = 0.5
                 continue
             try:

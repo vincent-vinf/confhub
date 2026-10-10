@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -290,5 +291,168 @@ func TestUnavailableWithoutCacheAndContextCancellation(t *testing.T) {
 	cancel()
 	if _, err = client.Get(ctx, confhub.Key{Name: "absent"}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected cancellation, got %v", err)
+	}
+}
+
+func TestWatchBacksOffWhenServerImmediatelyClosesConnections(t *testing.T) {
+	key := confhub.Key{Namespace: "public", Group: "DEFAULT_GROUP", Name: "retry"}
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/client/config" {
+			json.NewEncoder(w).Encode(confhub.Snapshot{Key: key, ID: "a", Sequence: 1, Revision: 1, Version: 1, Content: "one", Format: "text"})
+			return
+		}
+		conn, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		attempts.Add(1)
+		conn.Close()
+	}))
+	defer server.Close()
+	client, err := confhub.New(confhub.Options{Addresses: []string{server.URL}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close(context.Background())
+	if err = client.Subscribe(context.Background(), key, func(context.Context, confhub.Snapshot) {}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(150 * time.Millisecond)
+	if count := attempts.Load(); count > 2 {
+		t.Fatalf("rapid-close server caused reconnect storm: %d attempts in 150ms", count)
+	}
+}
+
+func TestMaximumEscapedContentSurvivesWatchAndDiskRestart(t *testing.T) {
+	key := confhub.Key{Namespace: "public", Group: "DEFAULT_GROUP", Name: "large"}
+	value := confhub.Snapshot{Key: key, ID: "large", Sequence: 1, Revision: 1, Version: 1, Content: strings.Repeat("\x00", 1<<20), Format: "text"}
+	var offline atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/client/config" {
+			if offline.Load() {
+				w.WriteHeader(503)
+				return
+			}
+			json.NewEncoder(w).Encode(value)
+			return
+		}
+		conn, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		var command any
+		if conn.ReadJSON(&command) != nil {
+			return
+		}
+		next := value
+		next.Sequence = 2
+		next.Version = 2
+		next.Revision = 2
+		conn.WriteJSON(next)
+		for {
+			if _, _, err = conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	defer server.Close()
+	options := confhub.Options{Addresses: []string{server.URL}, CacheDir: t.TempDir()}
+	client, err := confhub.New(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close(context.Background())
+	received := make(chan confhub.Snapshot, 2)
+	if err = client.Subscribe(context.Background(), key, func(ctx context.Context, v confhub.Snapshot) { received <- v }); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case v := <-received:
+			if len(v.Content) != 1<<20 {
+				t.Fatal("content truncated")
+			}
+			if v.Version == 2 {
+				goto done
+			}
+		case <-deadline:
+			t.Fatal("large watch snapshot not received")
+		}
+	}
+done:
+	client.Close(context.Background())
+	offline.Store(true)
+	restarted, err := confhub.New(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Close(context.Background())
+	cached, err := restarted.Get(context.Background(), key)
+	if err != nil || len(cached.Content) != 1<<20 || cached.Source != confhub.Disk {
+		t.Fatal("large disk cache rejected", err)
+	}
+}
+
+func TestDiskSnapshotFencesAnAlreadyRunningOlderQuery(t *testing.T) {
+	key := confhub.Key{Namespace: "public", Group: "DEFAULT_GROUP", Name: "fence"}
+	current := confhub.Snapshot{Key: key, ID: "same", Sequence: 42, Revision: 2, Version: 2, Content: "new", Format: "text"}
+	var holdNext atomic.Bool
+	var offline atomic.Bool
+	held := make(chan struct{})
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if holdNext.Swap(false) {
+			close(held)
+			<-release
+			old := current
+			old.Sequence = 40
+			old.Revision = 1
+			old.Version = 1
+			old.Content = "old"
+			json.NewEncoder(w).Encode(old)
+			return
+		}
+		if offline.Load() {
+			w.WriteHeader(503)
+			return
+		}
+		json.NewEncoder(w).Encode(current)
+	}))
+	defer server.Close()
+	options := confhub.Options{Addresses: []string{server.URL}, CacheDir: t.TempDir()}
+	client, err := confhub.New(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = client.Get(context.Background(), key); err != nil {
+		t.Fatal(err)
+	}
+	client.Close(context.Background())
+	client, err = confhub.New(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close(context.Background())
+	holdNext.Store(true)
+	offline.Store(true)
+	done := make(chan confhub.Snapshot, 1)
+	go func() { value, _ := client.Get(context.Background(), key); done <- value }()
+	<-held
+	cached, err := client.Get(context.Background(), key)
+	if err != nil || cached.Sequence != 42 {
+		close(release)
+		t.Fatal("disk cache unavailable", err)
+	}
+	close(release)
+	select {
+	case late := <-done:
+		if late.Sequence != 42 || late.Content != "new" {
+			t.Fatal("late response replaced newer disk snapshot", late)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("late request hung")
 	}
 }

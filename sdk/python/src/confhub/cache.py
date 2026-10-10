@@ -7,7 +7,7 @@ import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
-from .types import Key, Snapshot
+from .types import MAX_WIRE_BYTES, Key, Snapshot
 
 
 class DiskCache:
@@ -29,8 +29,8 @@ class DiskCache:
             return None
         try:
             with self._file(key).open("rb") as file:
-                raw = file.read((2 << 20) + 1)
-            if len(raw) > 2 << 20:
+                raw = file.read(MAX_WIRE_BYTES + 1)
+            if len(raw) > MAX_WIRE_BYTES:
                 return None
             value = Snapshot.from_dict(json.loads(raw))
             if value.key == key and not value.deleted:

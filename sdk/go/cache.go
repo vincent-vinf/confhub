@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -89,16 +90,10 @@ func (c *Client) applyLocked(value Snapshot) Snapshot {
 	return value
 }
 
-func (c *Client) accept(value Snapshot) Snapshot {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.applyLocked(value)
-}
-
 func (c *Client) cached(key Key) (Snapshot, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.closed {
+	if c.closed || c.ctx.Err() != nil {
 		return Snapshot{}, ErrClosed
 	}
 	if value, ok := c.records[key]; ok {
@@ -109,11 +104,14 @@ func (c *Client) cached(key Key) (Snapshot, error) {
 		return value, nil
 	}
 	if c.cachePath != "" {
-		raw, err := os.ReadFile(c.cacheFile(key))
-		if err == nil && len(raw) <= 2<<20 {
+		file, err := os.Open(c.cacheFile(key))
+		if err == nil {
+			raw, readErr := io.ReadAll(io.LimitReader(file, maxWireBytes+1))
+			file.Close()
 			var value Snapshot
-			if json.Unmarshal(raw, &value) == nil && value.valid(key) && !value.Deleted {
+			if readErr == nil && len(raw) <= maxWireBytes && json.Unmarshal(raw, &value) == nil && value.valid(key) && !value.Deleted {
 				value.Source = Disk
+				c.records[key] = value
 				return value, nil
 			}
 		}

@@ -41,6 +41,8 @@ type Client struct {
 	generation    uint64
 	wake          chan struct{}
 	wg            sync.WaitGroup
+	closeOnce     sync.Once
+	done          chan struct{}
 }
 
 func New(options Options) (*Client, error) {
@@ -78,7 +80,7 @@ func New(options Options) (*Client, error) {
 	}
 	raw, _ := json.Marshal(tags)
 	ctx, cancel := context.WithCancel(context.Background())
-	client := &Client{addresses: addresses, tags: string(raw), timeout: options.Timeout, http: &http.Client{}, ctx: ctx, cancel: cancel, records: map[Key]Snapshot{}, errors: make(chan error, 1), subscriptions: map[Key]*subscription{}, wake: make(chan struct{}, 1)}
+	client := &Client{addresses: addresses, tags: string(raw), timeout: options.Timeout, http: &http.Client{Transport: http.DefaultTransport.(*http.Transport).Clone()}, ctx: ctx, cancel: cancel, records: map[Key]Snapshot{}, errors: make(chan error, 1), subscriptions: map[Key]*subscription{}, wake: make(chan struct{}, 1), done: make(chan struct{})}
 	if err := client.initCache(options.CacheDir); err != nil {
 		cancel()
 		return nil, err
@@ -117,7 +119,7 @@ func (c *Client) Get(ctx context.Context, key Key) (Snapshot, error) {
 		return Snapshot{}, err
 	}
 	c.mu.Lock()
-	closed := c.closed
+	closed := c.closed || c.ctx.Err() != nil
 	c.mu.Unlock()
 	if closed {
 		return Snapshot{}, ErrClosed
@@ -139,13 +141,22 @@ func (c *Client) Get(ctx context.Context, key Key) (Snapshot, error) {
 			continue
 		}
 		var snapshot Snapshot
-		decodeErr := json.NewDecoder(io.LimitReader(response.Body, 2<<20)).Decode(&snapshot)
+		decodeErr := json.NewDecoder(io.LimitReader(response.Body, maxWireBytes)).Decode(&snapshot)
 		response.Body.Close()
 		finish()
 		if decodeErr != nil || !snapshot.valid(key) || (response.StatusCode != 200 && response.StatusCode != 404) || (response.StatusCode == 404) != snapshot.Deleted {
 			continue
 		}
-		snapshot = c.accept(snapshot)
+		if err = ctx.Err(); err != nil {
+			return Snapshot{}, err
+		}
+		c.mu.Lock()
+		if c.closed || c.ctx.Err() != nil {
+			c.mu.Unlock()
+			return Snapshot{}, ErrClosed
+		}
+		snapshot = c.applyLocked(snapshot)
+		c.mu.Unlock()
 		if snapshot.Deleted {
 			return snapshot, ErrNotFound
 		}
@@ -172,20 +183,24 @@ func (c *Client) report(err error) {
 }
 
 func (c *Client) Close(ctx context.Context) error {
-	c.mu.Lock()
-	c.closed = true
-	c.cancel()
-	for key, sub := range c.subscriptions {
-		sub.cancel()
-		delete(c.subscriptions, key)
-	}
-	c.resetLocked()
-	c.mu.Unlock()
-	c.http.CloseIdleConnections()
-	done := make(chan struct{})
-	go func() { c.wg.Wait(); close(done) }()
+	c.closeOnce.Do(func() {
+		c.cancel()
+		go func() {
+			c.mu.Lock()
+			c.closed = true
+			for key, sub := range c.subscriptions {
+				sub.cancel()
+				delete(c.subscriptions, key)
+			}
+			c.resetLocked()
+			c.mu.Unlock()
+			c.http.CloseIdleConnections()
+			c.wg.Wait()
+			close(c.done)
+		}()
+	})
 	select {
-	case <-done:
+	case <-c.done:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()

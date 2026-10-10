@@ -4,6 +4,7 @@ from dataclasses import dataclass, replace
 from typing import Literal
 
 Source = Literal["online", "memory", "disk"]
+MAX_WIRE_BYTES = 8 << 20  # JSON escaping can expand each raw byte sixfold.
 
 
 @dataclass(frozen=True)

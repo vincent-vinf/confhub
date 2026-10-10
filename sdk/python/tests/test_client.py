@@ -10,6 +10,9 @@ from confhub import AsyncClient, Client, Closed, Key, NotFound, Unavailable
 class ClientTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.mode = "online"
+        self.hold_next = False
+        self.held = asyncio.Event()
+        self.release = asyncio.Event()
         self.key = Key("服务.yaml")
         self.value = dict(
             sequence=42,
@@ -27,6 +30,7 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
         self.messages = asyncio.Queue()
         self.subscribed = asyncio.Event()
         self.watch_count = 0
+        self.reject_watch = False
         self.sockets = []
         self.runner = web.AppRunner(self.app)
         await self.runner.setup()
@@ -46,6 +50,9 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
         self.watch_count += 1
         await socket.receive_json()
         self.subscribed.set()
+        if self.reject_watch:
+            await socket.close()
+            return socket
         await socket.send_json(self.value)
         receiver = asyncio.create_task(socket.receive())
         try:
@@ -69,6 +76,13 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
         return socket
 
     async def get_config(self, request):
+        if self.hold_next:
+            self.hold_next = False
+            self.held.set()
+            await self.release.wait()
+            return web.json_response(
+                dict(self.value, sequence=40, revision=1, version=1, content="old")
+            )
         self.assertEqual(request.query["namespace"], "public")
         self.assertEqual(request.query["group"], "DEFAULT_GROUP")
         self.assertEqual(request.query["name"], "服务.yaml")
@@ -199,6 +213,74 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.to_thread(client.close)
         with self.assertRaises(Closed):
             await asyncio.to_thread(client.get, self.key)
+
+    async def test_close_waits_for_inflight_atomic_disk_write(self):
+        import os
+        import threading
+        from unittest.mock import patch
+
+        started = threading.Event()
+        release = threading.Event()
+        replace = os.replace
+
+        def slow_replace(source, target):
+            started.set()
+            release.wait(3)
+            replace(source, target)
+
+        with tempfile.TemporaryDirectory() as directory:
+            client = AsyncClient([self.address], cache_dir=directory)
+            try:
+                with patch("os.replace", slow_replace):
+                    operation = asyncio.create_task(client.get(self.key))
+                    while not started.is_set():
+                        await asyncio.sleep(0.01)
+                    operation.cancel()
+                    await asyncio.sleep(0.02)
+                    self.assertFalse(
+                        operation.done(),
+                        "cancelled cache writer escaped before atomic commit completed",
+                    )
+                    release.set()
+                    await asyncio.gather(operation, return_exceptions=True)
+            finally:
+                release.set()
+                await client.close()
+
+    async def test_rapid_disconnect_uses_backoff(self):
+        self.reject_watch = True
+        async with AsyncClient([self.address]) as client:
+            await client.subscribe(self.key, lambda value: None)
+            await asyncio.sleep(0.15)
+            self.assertLessEqual(self.watch_count, 2, "reconnect storm")
+
+    async def test_maximum_escaped_content_survives_disk_restart(self):
+        self.value = dict(self.value, content="\0" * (1 << 20), format="text")
+        with tempfile.TemporaryDirectory() as directory:
+            async with AsyncClient([self.address], cache_dir=directory) as client:
+                self.assertEqual(len((await client.get(self.key)).content), 1 << 20)
+            self.mode = "offline"
+            async with AsyncClient([self.address], cache_dir=directory) as client:
+                value = await client.get(self.key)
+                self.assertEqual((len(value.content), value.source), (1 << 20, "disk"))
+
+    async def test_disk_snapshot_fences_an_already_running_older_query(self):
+        with tempfile.TemporaryDirectory() as directory:
+            async with AsyncClient([self.address], cache_dir=directory) as client:
+                await client.get(self.key)
+            async with AsyncClient([self.address], cache_dir=directory) as client:
+                self.mode = "offline"
+                self.hold_next = True
+                pending = asyncio.create_task(client.get(self.key))
+                try:
+                    await asyncio.wait_for(self.held.wait(), 2)
+                    self.assertEqual((await client.get(self.key)).sequence, 42)
+                    self.release.set()
+                    late = await asyncio.wait_for(pending, 2)
+                    self.assertEqual((late.sequence, late.content), (42, "port: 8080\n"))
+                finally:
+                    self.release.set()
+                    await asyncio.gather(pending, return_exceptions=True)
 
 
 if __name__ == "__main__":

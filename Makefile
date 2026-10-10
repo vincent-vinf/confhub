@@ -3,6 +3,7 @@ PACKAGE := ./cmd/main
 DOCKER_REGISTRY ?= registry.cn-hangzhou.aliyuncs.com
 DOCKER_IMAGE ?= $(DOCKER_REGISTRY)/bodesi/confhub
 IMAGE_TAG ?= dev
+SDK_PYTHON ?= sdk/python/.venv/bin/python
 
 go-mod-download:
 	go mod download
@@ -48,6 +49,18 @@ frontend-check:
 frontend-e2e:
 	npm --prefix frontend run test:e2e
 
+sdk-test:
+	go -C sdk/go test -race ./...
+	$(SDK_PYTHON) -m unittest discover -s sdk/python/tests -v
+
+sdk-check:
+	go -C sdk/go vet ./...
+	$(SDK_PYTHON) -m mypy --config-file sdk/python/pyproject.toml sdk/python/src/confhub
+	$(SDK_PYTHON) -m ruff check --config sdk/python/pyproject.toml sdk/python/src sdk/python/tests sdk/test-integration.py
+
+sdk-integration:
+	python3 sdk/test-integration.py --python $(abspath $(SDK_PYTHON))
+
 clean:
 	rm -rf bin
 
@@ -56,4 +69,4 @@ docker-image-build-local:
 		--build-arg IMAGE_TAG=$(IMAGE_TAG) \
 		-t $(DOCKER_IMAGE):$(IMAGE_TAG) .
 
-.PHONY: go-mod-download test test-unit test-integration test-race vet build run clean docker-image-build-local frontend-install frontend-build frontend-test frontend-check frontend-e2e
+.PHONY: go-mod-download test test-unit test-integration test-race vet build run clean docker-image-build-local frontend-install frontend-build frontend-test frontend-check frontend-e2e sdk-test sdk-check sdk-integration
