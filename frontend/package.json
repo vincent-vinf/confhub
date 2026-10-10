@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "format": "prettier --write src e2e *.ts",
-    "format:check": "prettier --check src e2e *.ts"
+    "format:check": "prettier --check src e2e *.ts",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@codemirror/commands": "^6.8.1",
@@ -47,6 +48,7 @@
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
     "@vitejs/plugin-react": "^5.0.4",
+    "@vitest/coverage-v8": "^3.2.7",
     "jsdom": "^27.0.1",
     "prettier": "^3.9.9",
     "typescript": "^5.9.3",

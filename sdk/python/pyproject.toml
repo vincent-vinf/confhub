@@ -11,7 +11,7 @@ dependencies = ["aiohttp>=3.12,<4"]
 readme = "README.md"
 
 [project.optional-dependencies]
-dev = ["mypy>=1.15,<2", "ruff>=0.11,<1"]
+dev = ["mypy>=1.15,<2", "ruff>=0.11,<1", "coverage>=7.6,<8"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/confhub"]

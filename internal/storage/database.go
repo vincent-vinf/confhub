@@ -7,7 +7,6 @@ import (
 	"embed"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	mysqlsql "github.com/go-sql-driver/mysql"
@@ -17,6 +16,10 @@ import (
 	migratepg "github.com/golang-migrate/migrate/v4/database/postgres"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 	_ "github.com/lib/pq"
+	gormmysql "gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 //go:embed migrations/*/*.sql
@@ -25,7 +28,8 @@ var migrations embed.FS
 const SchemaVersion = 4
 
 type Store struct {
-	db      *sql.DB
+	db      *gorm.DB
+	pool    *sql.DB
 	dialect string
 }
 
@@ -55,7 +59,23 @@ func Open(ctx context.Context, dialect, dsn string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	return &Store{db: db, dialect: dialect}, nil
+	var dialector gorm.Dialector = postgres.New(postgres.Config{Conn: db})
+	if dialect == "mysql" {
+		dialector = gormmysql.New(gormmysql.Config{Conn: db})
+	}
+	orm, err := gorm.Open(dialector, &gorm.Config{
+		TranslateError: true,
+		// Mutations spanning multiple tables use explicit transactions below.
+		SkipDefaultTransaction: true,
+		DisableAutomaticPing:   true,
+		// Queries may contain configuration bodies or password hashes.
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	return &Store{db: orm, pool: db, dialect: dialect}, nil
 }
 func driverName(dialect string) (string, error) {
 	switch dialect {
@@ -67,24 +87,8 @@ func driverName(dialect string) (string, error) {
 		return "", fmt.Errorf("unsupported database %q", dialect)
 	}
 }
-func (s *Store) Close() error                   { return s.db.Close() }
-func (s *Store) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
-func (s *Store) query(q string) string {
-	if s.dialect != "postgres" {
-		return q
-	}
-	var b strings.Builder
-	n := 0
-	for _, r := range q {
-		if r == '?' {
-			n++
-			fmt.Fprintf(&b, "$%d", n)
-		} else {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
+func (s *Store) Close() error                   { return s.pool.Close() }
+func (s *Store) Ping(ctx context.Context) error { return s.pool.PingContext(ctx) }
 
 // Migrate uses its own connection pool. initializeOnly refuses to upgrade an
 // existing schema; upgrades must be explicitly requested via `confhub migrate`.

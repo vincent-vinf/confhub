@@ -22,7 +22,7 @@
 | 回退与提升新版本，保留其他目标 | CopyVersion、版本操作/来源记录 | 全量回退保持 beta、灰度回退拒绝、唯一 beta 转全量及主历史测试 |
 | 统一乐观锁与删除重建身份隔离 | 配置 UUID 和 revision 校验 | 两编辑者竞争、旧身份请求拒绝、HTTP 409 |
 | 历史数量、引用保护、短期维护租约、日志水位 | Cleanup、维护 worker | 近期主版本保留、beta 复制来源主历史可清理且 beta 保留、双租约拒绝 |
-| PostgreSQL / MySQL 与 golang-migrate | 两套 SQL、驱动适配器、独立迁移池、migrate 子命令 | PostgreSQL 全部集成；幂等迁移、业务池存活、dirty 拒绝；MySQL 仅静态审查 |
+| PostgreSQL / MySQL 与 golang-migrate | GORM 方言驱动、两套迁移 SQL、独立迁移池、migrate 子命令 | PostgreSQL 全部集成；幂等迁移、业务池存活、dirty 拒绝；MySQL 仅静态审查 |
 | admin 首次初始化、纯 JWT、密码修改、Cookie 来源保护 | InitializeAdmin、认证与密码 API | 重启不覆盖密码、新密码登录/旧密码拒绝、旧 JWT 保持有效、非法 JWT 和跨来源请求拒绝 |
 | 客户端匿名 HTTP GET 与完整 WebSocket 推送 | client config/watch API | 未登录读取、创建前缺失、发布、删除、同名重建推送 |
 | 独立广播消费、有界缓存/待发送状态、长连接容量限制 | Hub、stateCache、Session | 两实例消费、实际 HTTP 在 A 发布经 B WebSocket 接收；灰度无影响不通知、订阅上限与释放容量 |
@@ -74,3 +74,16 @@ presence worker 和配置同步 worker 独立运行。成功升级后记录临�
 `python3 sdk/test-integration.py --full` 通过：真实 PostgreSQL 的完整后端 race/vet、Go SDK 与 Python 10 条测试、双实例同名 beta 更新和离线缓存。前端 25 个单测及全部 18 条 Playwright 流程通过，包含置顶编辑、旧主版本复制、多规则共享、删除最后规则后重新复制，以及已有冲突、回退、IP 区间和在线客户端行为。TypeScript、Prettier、mypy、ruff、SDK vet 与 diff 检查通过。MySQL 未运行真实数据库测试，不执行压测。
 
 审查发现规则冲突恢复时 beta 可能已被其他管理员删除。新增浏览器回归先复现失败，再修正为保留编辑草稿并重选来源；元数据操作明确终止。该回归及两个受影响流程通过（共验证 19 条不同浏览器流程），修正后 TypeScript 通过。
+
+
+## GORM 存储重构（2026-10-10）
+
+应用常规 CRUD、联表查询、批量写入、Upsert 和行锁使用 GORM 1.31.1，PostgreSQL/MySQL 方言驱动为 1.6.0。公开 Store 接口及业务模型保持原有契约，存储行模型单独映射 schema 4；不使用 AutoMigrate，不增加数据库表或变更迁移文件。golang-migrate 继续负责空库初始化、显式升级、dirty 检查及独立迁移连接。
+
+全局序号计数行的排他锁、读已提交变更事务、可重复读快照、维护租约和在线客户端事务边界保持原有设计。时间字段显式保留微秒整数，编号禁止自动递增；更新使用 map 或明确字段，保留空字符串、0 和 false。在线客户端继续按连接数及字节数分批写入，稳定快照只续租。
+
+仅数据库时钟和 BYTEA/VARBINARY 前缀条件保留方言表达式，集中在 dialect.go。占位符转换和手写 Upsert 已移除，使用 GORM TranslateError 映射常见约束错误，再转成公开业务错误。ORM 查询日志关闭，不记录配置正文或密码哈希。当前显式模型足够小，不引入额外 Gen 生成流程。
+
+新增公共存储接口回归验证清空主/beta 正文与描述，以及在线客户端后续批次失败后回滚已写入批次；使用 Clients/Version/Snapshot/TagSuggestions 检查结果，不读取内部表作为业务断言。
+
+验证：PostgreSQL 后端 race、迁移、SDK、三实例 32 写入者/100 客户端/10 配置/10 轮并发、随机及六项故障恢复通过，覆盖率门槛通过，后端 83.78%。前端 44 个单测通过；修复浏览器测试辅助函数的下拉关闭/焦点等待后，全部 21 个浏览器流程通过。`make build`、vet、mypy、ruff、类型及格式检查通过。原失败与后续回归记录分别保留，详见 [测试运行指南](testing.md#gorm-重构验证2026-10-10)。按已确认边界未运行真实 MySQL 或压测。

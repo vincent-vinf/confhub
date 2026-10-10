@@ -23,5 +23,11 @@ export default defineConfig({
     setupFiles: ['./src/test-setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
     restoreMocks: true,
+    coverage: {
+      provider: 'v8',
+      include: ['src/lib/api.ts', 'src/lib/config.ts', 'src/lib/format.ts'],
+      reporter: ['text', 'json-summary', 'html'],
+      reportsDirectory: '../test-results/frontend-coverage',
+    },
   },
 })

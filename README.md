@@ -84,6 +84,17 @@ CONFHUB_DEV_BACKEND=http://127.0.0.1:8081 npm --prefix frontend run dev
 
 ## 测试
 
+范围与验收标准见 [测试计划](docs/testing-plan.md)，执行方式及验证记录见 [测试运行指南](docs/testing.md)。现已提供 Go 程序配合两种 SDK 测试运行中系统，以及隔离 PostgreSQL/三实例、并发、故障和覆盖率检查入口。
+
+```sh
+# 需先安装 sdk/python[dev]、frontend 依赖及 Chromium：
+make test-unit       # 业务规则、启动参数及两种 SDK 单元测试
+make test-full       # 隔离环境中的完整回归，含覆盖率门槛
+make test-fuzz       # 两组各 5 秒的 fuzz
+```
+
+测试运行器不读取真实 `.env` 或写入 `data/`，报告位于被 Git 忽略的 `test-results/`。运行中系统使用 `make test-system`，通过环境变量传入实例地址和密码，仅修改本次创建的独立 namespace；详细用法见运行指南。
+
 ```sh
 make test-unit
 # PostgreSQL 集成测试使用独立临时 schema，要求测试账户具有 CREATE SCHEMA 权限：

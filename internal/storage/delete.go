@@ -19,10 +19,10 @@ func (s *Store) Delete(ctx context.Context, k config.Key, id string, revision in
 	if err = checkEdit(state, id, revision); err != nil {
 		return config.Mutation{}, err
 	}
-	if _, err = tx.ExecContext(ctx, s.query("DELETE FROM gray_rules WHERE config_id=?"), state.ID); err != nil {
+	if err = tx.Where(map[string]any{"config_id": state.ID}).Delete(&ruleRow{}).Error; err != nil {
 		return config.Mutation{}, err
 	}
-	if _, err = tx.ExecContext(ctx, s.query("DELETE FROM configs WHERE id=?"), state.ID); err != nil {
+	if err = tx.Where(map[string]any{"id": state.ID}).Delete(&configRow{}).Error; err != nil {
 		return config.Mutation{}, err
 	}
 	seq, err = s.publish(ctx, tx, state, seq, true)

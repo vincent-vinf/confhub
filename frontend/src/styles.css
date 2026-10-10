@@ -1162,7 +1162,7 @@ tbody tr:hover {
 }
 .diff-head {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   background: var(--surface-subtle);
   border-bottom: 1px solid var(--border);
   font-size: 12px;
@@ -1170,6 +1170,7 @@ tbody tr:hover {
 }
 .diff-head span {
   padding: 9px 15px;
+  overflow-wrap: anywhere;
 }
 .diff-head span:last-child {
   border-left: 1px solid var(--border);

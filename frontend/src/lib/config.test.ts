@@ -103,4 +103,61 @@ describe('输入约束', () => {
       ruleError([{ ...rule, conditions: [{ tag: 'env', operator: 'eq', values: ['a', 'b'] }] }]),
     ).toContain('只能有一个')
   })
+  it.each([
+    ['192.168.2.1', '192.168.2.5'],
+    ['192.168.2.5', '192.168.2.5'],
+    ['2001:db8::1', '2001:db8::ffff'],
+    ['::', 'ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff'],
+    ['::ffff:192.168.2.1', '192.168.2.5'],
+    ['192.168.2.1', '::ffff:c0a8:205'],
+  ])('接受完整且按数值排序的 IP 区间 %s → %s', (start, end) => {
+    expect(
+      ruleError([
+        { ...rule, conditions: [{ tag: 'sys.ip', operator: 'ip_range', values: [start, end] }] },
+      ]),
+    ).toBeUndefined()
+  })
+  it.each([
+    ['192.168.2.10', '192.168.2.5'],
+    ['2001:db8::10', '2001:db8::2'],
+    ['192.168.2.1', '::1'],
+    ['192.168.02.1', '192.168.2.5'],
+    ['192.168.2.256', '192.168.2.5'],
+    ['127.1', '127.0.0.5'],
+    ['fe80::1%eth0', 'fe80::2%eth0'],
+    [':::1', '::2'],
+    ['2001:db8::zz', '2001:db8::ffff'],
+    ['192.168.2.1:80', '192.168.2.5'],
+    ['::ffff:192.168.02.1', '192.168.2.5'],
+    ['192.168.2.1', ''],
+  ])('拦截非法 IP 区间 %s → %s', (start, end) => {
+    expect(
+      ruleError([
+        { ...rule, conditions: [{ tag: 'sys.ip', operator: 'ip_range', values: [start, end] }] },
+      ]),
+    ).toContain('IP 区间')
+  })
+  it('规则和条件数量及 UTF-8 字节上限在保存前检查', () => {
+    expect(
+      ruleError(Array.from({ length: 101 }, (_, i) => ({ ...rule, id: String(i) }))),
+    ).toContain('100 条')
+    expect(ruleError([{ ...rule, name: '中'.repeat(43) }])).toContain('128 字节')
+    expect(ruleError([{ ...rule, conditions: [] }])).toContain('1–32')
+    expect(
+      ruleError([{ ...rule, conditions: Array.from({ length: 33 }, () => rule.conditions[0]) }]),
+    ).toContain('1–32')
+    expect(
+      ruleError([{ ...rule, conditions: [{ tag: '', operator: 'eq', values: ['gray'] }] }]),
+    ).toContain('标签名称')
+    expect(
+      ruleError([
+        { ...rule, conditions: [{ tag: 'env', operator: 'in', values: ['中'.repeat(171)] }] },
+      ]),
+    ).toContain('512 字节')
+    expect(
+      ruleError([
+        { ...rule, conditions: [{ tag: 'env', operator: 'in', values: Array(101).fill('gray') }] },
+      ]),
+    ).toContain('100 个')
+  })
 })

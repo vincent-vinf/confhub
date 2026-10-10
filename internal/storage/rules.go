@@ -33,7 +33,7 @@ func (s *Store) SetRules(ctx context.Context, k config.Key, id string, revision 
 		if source < 1 {
 			return config.Mutation{}, fmt.Errorf("%w: select a main version to initialize beta", config.ErrInvalid)
 		}
-		v, e := scanVersion(tx.QueryRowContext(ctx, s.query("SELECT number,content,format,description,action,source_version,created_at FROM config_versions WHERE config_id=? AND number=?"), state.ID, source))
+		v, e := loadVersion(tx, state.ID, source)
 		if e != nil {
 			return config.Mutation{}, e
 		}

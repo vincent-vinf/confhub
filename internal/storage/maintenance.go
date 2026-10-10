@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // Cleanup performs one bounded batch while holding the same mutation lock as
@@ -17,75 +20,58 @@ func (s *Store) Cleanup(ctx context.Context, owner string, history int, retentio
 		return false, err
 	}
 	defer tx.Rollback()
-	var now int64
-	clockQuery := "SELECT CAST(EXTRACT(EPOCH FROM clock_timestamp())*1000000 AS BIGINT)"
-	if s.dialect == "mysql" {
-		clockQuery = "SELECT CAST(UNIX_TIMESTAMP(NOW(6))*1000000 AS SIGNED)"
-	}
-	if err = tx.QueryRowContext(ctx, clockQuery).Scan(&now); err != nil {
-		return false, err
-	}
-	var current string
-	var expires int64
-	if err = tx.QueryRowContext(ctx, "SELECT owner,expires_at FROM maintenance_lease WHERE id=1 FOR UPDATE").Scan(&current, &expires); err != nil {
-		return false, err
-	}
-	if current != owner && expires > now {
-		return false, nil
-	}
-	if _, err = tx.ExecContext(ctx, s.query("UPDATE maintenance_lease SET owner=?,expires_at=? WHERE id=1"), owner, now+(10*time.Second).Microseconds()); err != nil {
-		return false, err
-	}
-	rows, err := tx.QueryContext(ctx, s.query("SELECT v.config_id,v.number FROM config_versions v JOIN configs c ON c.id=v.config_id WHERE v.number<=c.last_version-? AND v.number<>c.global_version ORDER BY v.config_id,v.number LIMIT ?"), history, batch)
+	now, err := s.databaseTime(tx)
 	if err != nil {
 		return false, err
 	}
-	type candidate struct {
-		id     string
-		number int64
-	}
-	candidates := []candidate{}
-	for rows.Next() {
-		var c candidate
-		if err = rows.Scan(&c.id, &c.number); err != nil {
-			break
-		}
-		candidates = append(candidates, c)
-	}
-	if err = errorsJoinRows(err, rows); err != nil {
+	var lease leaseRow
+	if err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).Take(&lease, 1).Error; err != nil {
 		return false, err
 	}
-	for _, c := range candidates {
-		if _, err = tx.ExecContext(ctx, s.query("DELETE FROM config_versions WHERE config_id=? AND number=?"), c.id, c.number); err != nil {
+	if lease.Owner != owner && lease.ExpiresAt > now {
+		return false, nil
+	}
+	if err = tx.Model(&leaseRow{}).Where(map[string]any{"id": 1}).Updates(map[string]any{
+		"owner": owner, "expires_at": now + (10 * time.Second).Microseconds(),
+	}).Error; err != nil {
+		return false, err
+	}
+	var candidates []versionRow
+	err = tx.Table("config_versions AS v").Select("v.config_id", "v.number").Clauses(clause.From{
+		Tables: []clause.Table{{Name: "config_versions", Alias: "v"}},
+		Joins: []clause.Join{{Type: clause.InnerJoin, Table: clause.Table{Name: "configs", Alias: "c"},
+			ON: clause.Where{Exprs: []clause.Expression{clause.Eq{Column: column("c", "id"), Value: column("v", "config_id")}}}}},
+	}).Where(clause.Lte{Column: column("v", "number"), Value: gorm.Expr("? - ?", column("c", "last_version"), history)}).
+		Where(clause.Neq{Column: column("v", "number"), Value: column("c", "global_version")}).
+		Order(clause.OrderByColumn{Column: column("v", "config_id")}).
+		Order(clause.OrderByColumn{Column: column("v", "number")}).Limit(batch).Find(&candidates).Error
+	if err != nil {
+		return false, err
+	}
+	for _, row := range candidates {
+		if err = tx.Where(map[string]any{"config_id": row.ConfigID, "number": row.Number}).Delete(&versionRow{}).Error; err != nil {
 			return false, err
 		}
 	}
-	rows, err = tx.QueryContext(ctx, s.query("SELECT sequence,created_at FROM change_events ORDER BY sequence LIMIT ?"), batch)
-	if err != nil {
+	var events []eventRow
+	if err = tx.Select("sequence", "created_at").Order("sequence").Limit(batch).Find(&events).Error; err != nil {
 		return false, err
 	}
 	through := int64(0)
 	cutoff := now - retention.Microseconds()
-	for rows.Next() {
-		var seq, created int64
-		if err = rows.Scan(&seq, &created); err != nil {
+	for _, event := range events {
+		if event.CreatedAt >= cutoff {
 			break
 		}
-		if created >= cutoff {
-			break
-		}
-		through = seq
-	}
-	if err = errorsJoinRows(err, rows); err != nil {
-		return false, err
+		through = event.Sequence
 	}
 	if through > 0 {
-		if _, err = tx.ExecContext(ctx, s.query("DELETE FROM change_events WHERE sequence<=?"), through); err != nil {
+		if err = tx.Where(clause.Lte{Column: "sequence", Value: through}).Delete(&eventRow{}).Error; err != nil {
 			return false, err
 		}
-		if _, err = tx.ExecContext(ctx, s.query("UPDATE change_stream SET purged_through=? WHERE id=1"), through); err != nil {
+		if err = tx.Model(&streamRow{}).Where(map[string]any{"id": 1}).Update("purged_through", through).Error; err != nil {
 			return false, err
 		}
 	}
-	return true, tx.Commit()
+	return true, tx.Commit().Error
 }

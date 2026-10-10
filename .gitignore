@@ -29,3 +29,6 @@ __pycache__/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
+
+# Layered testing reports and owned temporary binaries.
+/test-results/

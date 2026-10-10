@@ -305,7 +305,7 @@ export function RulesPanel({
             <div className="button-row">
               <Button onClick={onEditBeta}>
                 <Pencil size={15} aria-hidden="true" />
-                编辑 beta 配置
+                编辑配置
               </Button>
               <Button onClick={promote}>转为全量</Button>
             </div>

@@ -2,7 +2,7 @@ import asyncio
 import tempfile
 import unittest
 
-from aiohttp import web
+from aiohttp import WSMsgType, web
 
 from confhub import AsyncClient, Client, Closed, Key, NotFound, Unavailable
 
@@ -48,7 +48,9 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
         await socket.prepare(request)
         self.sockets.append(socket)
         self.watch_count += 1
-        await socket.receive_json()
+        message = await socket.receive()
+        if message.type != WSMsgType.TEXT:
+            return socket
         self.subscribed.set()
         if self.reject_watch:
             await socket.close()
@@ -147,7 +149,13 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(first.version, 3)
             await asyncio.wait_for(self.subscribed.wait(), 2)
             self.value = dict(
-                self.value, sequence=43, revision=8, version=0, beta=True, content="gray one", rule_id="gray"
+                self.value,
+                sequence=43,
+                revision=8,
+                version=0,
+                beta=True,
+                content="gray one",
+                rule_id="gray",
             )
             await self.messages.put(self.value)
             lower = await asyncio.wait_for(received.get(), 2)
@@ -173,7 +181,9 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue((await asyncio.wait_for(received.get(), 2)).deleted)
             with self.assertRaises(NotFound):
                 await client.get(self.key)  # stale live HTTP result cannot resurrect deletion
-            rebuilt = dict(self.value, sequence=46, revision=1, id="rebuilt", version=1, beta=False, rule_id="")
+            rebuilt = dict(
+                self.value, sequence=46, revision=1, id="rebuilt", version=1, beta=False, rule_id=""
+            )
             await self.messages.put(rebuilt)
             self.assertEqual((await asyncio.wait_for(received.get(), 2)).id, "rebuilt")
             await client.unsubscribe(self.key)
@@ -300,6 +310,105 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
                 finally:
                     self.release.set()
                     await asyncio.gather(pending, return_exceptions=True)
+
+    async def test_duplicate_cancel_and_close_are_bounded(self):
+        client = AsyncClient([self.address])
+        await client.subscribe(self.key, lambda value: None)
+        with self.assertRaises(ValueError):
+            await client.subscribe(self.key, lambda value: None)
+        await client.unsubscribe(self.key)
+        await client.subscribe(self.key, lambda value: None)
+        pending = [asyncio.create_task(client.get(self.key)) for _ in range(16)]
+        closed = [asyncio.create_task(client.close()) for _ in range(8)]
+        results = await asyncio.wait_for(
+            asyncio.gather(*pending, *closed, return_exceptions=True), 3
+        )
+        for value in results:
+            if isinstance(value, BaseException):
+                self.assertIsInstance(value, Closed)
+        with self.assertRaises(Closed):
+            await client.get(self.key)
+        await client.close()
+
+    async def test_callback_exception_does_not_stop_later_updates(self):
+        first = asyncio.Event()
+        delivered = asyncio.Queue()
+
+        async def callback(value):
+            if value.version == 3:
+                first.set()
+                raise RuntimeError("application callback failure")
+            await delivered.put(value)
+
+        async with AsyncClient([self.address]) as client:
+            await client.subscribe(self.key, callback)
+            await asyncio.wait_for(first.wait(), 2)
+            await asyncio.wait_for(self.subscribed.wait(), 2)
+            error = await asyncio.wait_for(client.errors.get(), 2)
+            self.assertIsInstance(error, RuntimeError)
+            await self.messages.put(
+                dict(self.value, sequence=43, revision=8, version=4, content="next")
+            )
+            value = await asyncio.wait_for(delivered.get(), 2)
+            self.assertEqual((value.version, value.content), (4, "next"))
+
+
+class ValidationTests(unittest.TestCase):
+    def test_invalid_options_and_keys(self):
+        for addresses in (
+            [],
+            "http://localhost",
+            ["ftp://localhost"],
+            ["http://user:pass@localhost"],
+            ["http://localhost?x=1"],
+            ["http://localhost#x"],
+        ):
+            with self.subTest(addresses=addresses), self.assertRaises(ValueError):
+                AsyncClient(addresses)
+        for tags in ({"": "value"}, {"tag": "x" * 513}, {"x" * 129: "value"}):
+            with self.subTest(tags=tags), self.assertRaises(ValueError):
+                AsyncClient(["http://localhost"], tags=tags)
+        for name in ("", " leading", "trailing ", "a/b", "a\\b", "a\x00b", "中" * 43):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                Key(name)
+
+
+class SubscriptionLimitTests(unittest.IsolatedAsyncioTestCase):
+    async def test_ten_keys_fit_and_unsubscribe_releases_capacity(self):
+        async def get_config(request):
+            return web.json_response(
+                dict(
+                    key={field: request.query[field] for field in ("namespace", "group", "name")},
+                    id="configuration",
+                    sequence=1,
+                    revision=1,
+                    version=1,
+                    content="value",
+                    format="text",
+                )
+            )
+
+        async def unavailable_watch(request):
+            return web.Response(status=503)
+
+        app = web.Application()
+        app.router.add_get("/api/client/config", get_config)
+        app.router.add_get("/api/client/watch", unavailable_watch)
+        server = web.AppRunner(app)
+        await server.setup()
+        site = web.TCPSite(server, "127.0.0.1", 0)
+        await site.start()
+        address = "http://127.0.0.1:" + str(server.addresses[0][1])
+        try:
+            async with AsyncClient([address]) as client:
+                for index in range(10):
+                    await client.subscribe(Key(f"key-{index}"), lambda value: None)
+                with self.assertRaises(ValueError):
+                    await client.subscribe(Key("eleventh"), lambda value: None)
+                await client.unsubscribe(Key("key-0"))
+                await client.subscribe(Key("replacement"), lambda value: None)
+        finally:
+            await server.cleanup()
 
 
 if __name__ == "__main__":

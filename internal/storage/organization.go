@@ -2,19 +2,19 @@ package storage
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 
 	"gitlab.bodesitech.com/bodesi/confhub/internal/config"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func (s *Store) CreateNamespace(ctx context.Context, name string) error {
 	if err := config.ValidateName(name); err != nil {
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, s.query("INSERT INTO namespaces(name) VALUES (?)"), name)
-	return storageError(err)
+	return storageError(s.db.WithContext(ctx).Create(&namespaceRow{Name: name}).Error)
 }
 func (s *Store) CreateGroup(ctx context.Context, namespace, name string) error {
 	if err := config.ValidateName(namespace); err != nil {
@@ -23,30 +23,17 @@ func (s *Store) CreateGroup(ctx context.Context, namespace, name string) error {
 	if err := config.ValidateName(name); err != nil {
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, s.query("INSERT INTO config_groups(namespace,name) VALUES (?,?)"), namespace, name)
-	return storageError(err)
+	return storageError(s.db.WithContext(ctx).Create(&groupRow{Namespace: namespace, Name: name}).Error)
 }
 func (s *Store) Namespaces(ctx context.Context) ([]string, error) {
-	return s.names(ctx, "SELECT name FROM namespaces ORDER BY name")
+	names := []string{}
+	err := s.db.WithContext(ctx).Model(&namespaceRow{}).Order("name").Pluck("name", &names).Error
+	return names, err
 }
 func (s *Store) Groups(ctx context.Context, namespace string) ([]string, error) {
-	return s.names(ctx, "SELECT name FROM config_groups WHERE namespace=? ORDER BY name", namespace)
-}
-func (s *Store) names(ctx context.Context, q string, args ...any) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, s.query(q), args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
 	names := []string{}
-	for rows.Next() {
-		var name string
-		if err = rows.Scan(&name); err != nil {
-			return nil, err
-		}
-		names = append(names, name)
-	}
-	return names, rows.Err()
+	err := s.db.WithContext(ctx).Model(&groupRow{}).Where(map[string]any{"namespace": namespace}).Order("name").Pluck("name", &names).Error
+	return names, err
 }
 func (s *Store) DeleteNamespace(ctx context.Context, namespace string) error {
 	return s.deleteOrganization(ctx, namespace, "")
@@ -60,29 +47,25 @@ func (s *Store) deleteOrganization(ctx context.Context, namespace, group string)
 		return err
 	}
 	defer tx.Rollback()
-	var result sql.Result
+	var result *gorm.DB
 	// Foreign keys reject concurrent creation of a child during deletion; the
 	// stream lock also coordinates configuration creation/deletion with this check.
 	if group == "" {
-		result, err = tx.ExecContext(ctx, s.query("DELETE FROM namespaces WHERE name=?"), namespace)
+		result = tx.Where(map[string]any{"name": namespace}).Delete(&namespaceRow{})
 	} else {
-		result, err = tx.ExecContext(ctx, s.query("DELETE FROM config_groups WHERE namespace=? AND name=?"), namespace, group)
+		result = tx.Where(map[string]any{"namespace": namespace, "name": group}).Delete(&groupRow{})
 	}
-	if err != nil {
-		mapped := storageError(err)
+	if result.Error != nil {
+		mapped := storageError(result.Error)
 		if errors.Is(mapped, config.ErrInvalid) {
 			return config.ErrNotEmpty
 		}
 		return mapped
 	}
-	count, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if count == 0 {
+	if result.RowsAffected == 0 {
 		return config.ErrNotFound
 	}
-	return tx.Commit()
+	return tx.Commit().Error
 }
 
 type ConfigSummary struct {
@@ -97,18 +80,17 @@ func (s *Store) List(ctx context.Context, namespace, group, after string, limit 
 	if limit < 1 || limit > 200 {
 		return nil, fmt.Errorf("%w: limit must be 1–200", config.ErrInvalid)
 	}
-	rows, err := s.db.QueryContext(ctx, s.query("SELECT id,name,revision,global_version,last_version FROM configs WHERE namespace=? AND group_name=? AND name>? ORDER BY name LIMIT ?"), namespace, group, after, limit)
+	var rows []configRow
+	err := s.db.WithContext(ctx).Where(map[string]any{"namespace": namespace, "group_name": group}).
+		Where(clause.Gt{Column: "name", Value: after}).Order("name").Limit(limit).Find(&rows).Error
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	result := []ConfigSummary{}
-	for rows.Next() {
-		v := ConfigSummary{Key: config.Key{Namespace: namespace, Group: group}}
-		if err = rows.Scan(&v.ID, &v.Key.Name, &v.Revision, &v.GlobalVersion, &v.LastVersion); err != nil {
-			return nil, err
-		}
-		result = append(result, v)
+	result := make([]ConfigSummary, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, ConfigSummary{ID: row.ID,
+			Key:      config.Key{Namespace: namespace, Group: group, Name: row.Name},
+			Revision: row.Revision, GlobalVersion: row.GlobalVersion, LastVersion: row.LastVersion})
 	}
-	return result, rows.Err()
+	return result, nil
 }

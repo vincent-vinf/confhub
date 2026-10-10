@@ -39,6 +39,8 @@ export function ChangeDialog({
   const [current, setCurrent] = useState(baseline)
   const originalID = useRef(baseline?.id)
   const graySave = action.kind === 'save' && action.draft.target === 'beta'
+  const rollback = action.kind === 'rollback'
+  const canCompareHistory = !graySave && !rollback
   const currentTarget = current ? targetVersion(current, graySave ? 'beta' : undefined) : undefined
   const [comparison, setComparison] = useState(currentTarget?.number ?? 0)
   const [checked, setChecked] = useState(false)
@@ -51,19 +53,23 @@ export function ChangeDialog({
   const versions = useQuery({
     queryKey: ['versions', configKey],
     queryFn: ({ signal }) => allVersions(configKey, signal),
-    enabled: !!current && !graySave,
+    enabled: !!current && canCompareHistory,
   })
   const known = comparison ? current?.versions[comparison] : undefined
   const other = useQuery({
     queryKey: ['version', configKey, comparison],
     queryFn: ({ signal }) => api.version(configKey, comparison, signal),
-    enabled: !graySave && comparison > 0 && !known,
+    enabled: canCompareHistory && comparison > 0 && !known,
   })
-  const before = graySave
-    ? currentTarget
-    : comparison === 0
-      ? { content: '', format: action.kind === 'save' ? action.draft.format : action.source.format }
-      : (known ?? other.data)
+  const before =
+    graySave || rollback
+      ? currentTarget
+      : comparison === 0
+        ? {
+            content: '',
+            format: action.kind === 'save' ? action.draft.format : action.source.format,
+          }
+        : (known ?? other.data)
   const promotionSource =
     action.kind === 'promote' && current ? targetVersion(current, 'beta') : undefined
   const after = action.kind === 'save' ? action.draft : (promotionSource ?? action.source)
@@ -207,7 +213,7 @@ export function ChangeDialog({
         <p className="field-error">该名称已存在，请返回编辑并更换名称。</p>
       )}
       {noChange && <div className="notice info">内容与当前编辑目标一致，无需发布。</div>}
-      {!graySave && (
+      {canCompareHistory && (
         <>
           <div className="diff-toolbar">
             <label>
@@ -250,8 +256,20 @@ export function ChangeDialog({
       {before ? (
         <ConfigDiff
           key={`${current?.revision ?? 0}-${comparison}`}
-          beforeTitle={graySave ? '修改前 · 当前灰度内容' : undefined}
-          afterTitle={graySave ? '修改后 · 将覆盖临时内容' : undefined}
+          beforeTitle={
+            rollback
+              ? `当前全量 v${currentTarget?.number}`
+              : graySave
+                ? '修改前 · 当前灰度内容'
+                : undefined
+          }
+          afterTitle={
+            rollback
+              ? `回退来源 v${action.source.number} · 将发布为 v${(current?.last_version ?? 0) + 1}`
+              : graySave
+                ? '修改后 · 将覆盖临时内容'
+                : undefined
+          }
           before={before.content}
           after={after.content}
           beforeFormat={before.format}

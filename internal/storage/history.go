@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"gitlab.bodesitech.com/bodesi/confhub/internal/config"
+	"gorm.io/gorm/clause"
 )
 
 // CopyVersion performs rollback or promotion within the same transaction as
@@ -30,7 +31,7 @@ func (s *Store) CopyVersion(ctx context.Context, k config.Key, id string, revisi
 		if target != "" || source < 1 {
 			return config.Mutation{}, fmt.Errorf("%w: rollback only supports main versions", config.ErrInvalid)
 		}
-		v, err = scanVersion(tx.QueryRowContext(ctx, s.query("SELECT number,content,format,description,action,source_version,created_at FROM config_versions WHERE config_id=? AND number=?"), state.ID, source))
+		v, err = loadVersion(tx, state.ID, source)
 		if err != nil {
 			return config.Mutation{}, err
 		}
@@ -76,9 +77,9 @@ func (s *Store) History(ctx context.Context, k config.Key, before int64, limit i
 	if limit < 1 || limit > 100 {
 		return VersionPage{}, fmt.Errorf("%w: limit must be 1–100", config.ErrInvalid)
 	}
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
-	if err != nil {
-		return VersionPage{}, err
+	tx := s.db.WithContext(ctx).Begin(&sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if tx.Error != nil {
+		return VersionPage{}, tx.Error
 	}
 	defer tx.Rollback()
 	state, err := s.load(ctx, tx, k)
@@ -88,38 +89,24 @@ func (s *Store) History(ctx context.Context, k config.Key, before int64, limit i
 	if before <= 0 {
 		before = state.LastVersion + 1
 	}
-	rows, err := tx.QueryContext(ctx, s.query("SELECT number,format,description,action,source_version,created_at FROM config_versions WHERE config_id=? AND number<? ORDER BY number DESC LIMIT ?"), state.ID, before, limit)
+	var rows []versionRow
+	// Omit bodies at the database boundary; history pages only need metadata.
+	err = tx.Select("number", "format", "description", "action", "source_version", "created_at").
+		Where(map[string]any{"config_id": state.ID}).Where(clause.Lt{Column: "number", Value: before}).
+		Order(clause.OrderByColumn{Column: clause.Column{Name: "number"}, Desc: true}).Limit(limit).Find(&rows).Error
 	if err != nil {
 		return VersionPage{}, err
 	}
-	page := VersionPage{Versions: []config.Version{}}
-	for rows.Next() {
-		var v config.Version
-		var created int64
-		if err = rows.Scan(&v.Number, &v.Format, &v.Description, &v.Action, &v.SourceVersion, &created); err != nil {
-			break
-		}
-		v.CreatedAt = time.UnixMicro(created).UTC()
+	page := VersionPage{Versions: make([]config.Version, 0, len(rows))}
+	for _, row := range rows {
+		v := row.version()
 		if v.Number == state.GlobalVersion {
 			v.References = append(v.References, "global")
 		}
 		page.Versions = append(page.Versions, v)
 	}
-	if err = errorsJoinRows(err, rows); err != nil {
-		return VersionPage{}, err
-	}
 	if len(page.Versions) == limit {
 		page.NextBefore = page.Versions[len(page.Versions)-1].Number
 	}
-	return page, tx.Commit()
-}
-func errorsJoinRows(err error, rows *sql.Rows) error {
-	if err == nil {
-		err = rows.Err()
-	}
-	closeErr := rows.Close()
-	if err == nil {
-		err = closeErr
-	}
-	return err
+	return page, tx.Commit().Error
 }

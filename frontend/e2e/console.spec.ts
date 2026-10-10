@@ -40,8 +40,13 @@ async function save(
   return (await response.json()).state
 }
 async function choose(page: Page, label: string, option: string | RegExp) {
-  await page.getByRole('combobox', { name: label, exact: true }).click()
+  const trigger = page.getByRole('combobox', { name: label, exact: true })
+  await trigger.click()
   await page.getByRole('option', { name: option, exact: typeof option === 'string' }).click()
+  // Closing a Radix menu restores focus asynchronously; wait before filling
+  // another field so that restoration cannot steal its text input.
+  await expect(page.getByRole('listbox')).not.toBeVisible()
+  await expect(trigger).toBeFocused()
 }
 async function edit(page: Page, content: string) {
   await page.getByRole('textbox', { name: '配置内容', exact: true }).fill(content)
@@ -123,12 +128,98 @@ test('历史查看、任意版本比较、切换比较保持保存基准、回�
   await expect(page.getByRole('textbox', { name: '待发布内容' })).toHaveText('{"v":3}')
   await page.getByRole('button', { name: '关闭', exact: true }).click()
   await page.getByRole('button', { name: '回退到 v1', exact: true }).click()
+  await expect(page.getByRole('combobox', { name: '对比版本', exact: true })).toHaveCount(0)
+  await expect(page.locator('.diff-head')).toContainText('当前全量 v3')
+  await expect(page.locator('.diff-head')).toContainText('回退来源 v1 · 将发布为 v4')
   await confirm(page, '确认回退并发布')
   s = await state(page.request, name)
   expect(s.global_version).toBe(4)
   expect(s.versions[4].content).toBe('{"v":1}')
   expect(s.versions[4].source_version).toBe(1)
   expect(s.versions[4].description).toBeTruthy()
+})
+
+test('回退固定版本标识、明暗窄屏与冲突后重新确认', async ({ page }) => {
+  await login(page)
+  const name = 'rollback-fixed.json'
+  let s = await save(page.request, name, '{"v":1}')
+  s = await save(page.request, name, '{"v":2}', s)
+  await page.goto(`${url(name)}?tab=history`)
+  await page.getByRole('button', { name: '回退到 v1', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '确认全量回退' })
+  const before = dialog.getByRole('textbox', { name: '对比版本内容' })
+  const after = dialog.getByRole('textbox', { name: '待发布内容' })
+  await expect(dialog.getByRole('combobox')).toHaveCount(0)
+  await expect(dialog.locator('.diff-head')).toHaveText('当前全量 v2回退来源 v1 · 将发布为 v3')
+  await expect(before).toHaveText('{"v":2}')
+  await expect(after).toHaveText('{"v":1}')
+  await expect(before).toHaveAttribute('aria-readonly', 'true')
+  await expect(after).toHaveAttribute('aria-readonly', 'true')
+  expect(
+    (await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze()).violations,
+  ).toEqual([])
+  await page.screenshot({ path: '../docs/images/frontend/rollback-light.png', fullPage: true })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await dialog.getByRole('button', { name: '返回编辑', exact: true }).click()
+  await page.getByRole('button', { name: '切换深色主题' }).click()
+  await page.getByRole('button', { name: '回退到 v1', exact: true }).click()
+  for (const viewport of [
+    { width: 375, height: 812 },
+    { width: 812, height: 375 },
+  ]) {
+    await page.setViewportSize(viewport)
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+      .toBe(true)
+    await expect(dialog.locator('.cm-merge-a')).toHaveAttribute('data-diff-title', '当前全量 v2')
+    await expect(dialog.locator('.cm-merge-b')).toHaveAttribute(
+      'data-diff-title',
+      '回退来源 v1 · 将发布为 v3',
+    )
+    expect(
+      (await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze()).violations,
+    ).toEqual([])
+    if (viewport.width === 375)
+      await page.screenshot({
+        path: '../docs/images/frontend/rollback-mobile-dark.png',
+        fullPage: true,
+      })
+  }
+  s = await save(page.request, name, '{"v":3}', s)
+  await dialog.getByRole('checkbox').check()
+  await dialog.getByRole('button', { name: '确认回退并发布', exact: true }).click()
+  await expect(dialog.getByRole('alert')).toContainText('被其他人修改')
+  await dialog.getByRole('button', { name: '读取最新版本并重新对比' }).click()
+  await expect(before).toHaveText('{"v":3}')
+  await expect(after).toHaveText('{"v":1}')
+  await expect(dialog.locator('.cm-merge-a')).toHaveAttribute('data-diff-title', '当前全量 v3')
+  await expect(dialog.locator('.cm-merge-b')).toHaveAttribute(
+    'data-diff-title',
+    '回退来源 v1 · 将发布为 v4',
+  )
+  await expect(dialog.getByRole('combobox')).toHaveCount(0)
+  await expect(dialog.getByRole('checkbox')).not.toBeChecked()
+  await expect(dialog.getByRole('button', { name: '确认回退并发布', exact: true })).toBeDisabled()
+  const rollbackRequest = page.waitForRequest(
+    (request) => request.method() === 'POST' && request.url().endsWith(`${path(name)}/rollback`),
+  )
+  await confirm(page, '确认回退并发布')
+  expect((await rollbackRequest).postDataJSON()).toMatchObject({
+    expected_id: s.id,
+    expected_revision: s.revision,
+    source_version: 1,
+  })
+  const result = await state(page.request, name)
+  expect(result.global_version).toBe(4)
+  expect(result.versions[4]).toMatchObject({ content: '{"v":1}', source_version: 1 })
+  // Rolling back to the current content still requires no new publication.
+  await page.getByRole('button', { name: '回退到 v4', exact: true }).click()
+  await expect(dialog.locator('.diff-head')).toHaveText('当前全量 v4回退来源 v4 · 将发布为 v5')
+  await expect(dialog).toContainText('无需发布')
+  await dialog.getByRole('checkbox').check()
+  await expect(dialog.getByRole('button', { name: '确认回退并发布', exact: true })).toBeDisabled()
+  await dialog.getByRole('button', { name: '返回编辑', exact: true }).click()
+  expect((await state(page.request, name)).last_version).toBe(4)
 })
 
 test('共享 beta 原位编辑、前后 diff、主历史、转全量及关闭重开删除', async ({ page }, testInfo) => {
@@ -809,6 +900,7 @@ test('唯一 beta 历史置顶编辑、选择旧来源、多规则共享与删�
   await page.getByRole('button', { name: '查看影响并确认' }).click()
   await expect(page.getByRole('dialog')).toContainText('从主版本 v1 复制')
   await confirmRule(page)
+  expect((await state(page.request, name)).rules[0].name).toBe('范围 A')
   await page.getByRole('button', { name: '新增规则', exact: true }).click()
   await expect(page.getByLabel('beta 复制来源', { exact: true })).toHaveCount(0)
   await page.getByLabel('规则名称', { exact: true }).fill('范围 B')

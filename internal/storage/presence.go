@@ -11,14 +11,8 @@ import (
 
 	"gitlab.bodesitech.com/bodesi/confhub/internal/clientinfo"
 	"gitlab.bodesitech.com/bodesi/confhub/internal/config"
+	"gorm.io/gorm/clause"
 )
-
-func (s *Store) clockQuery() string {
-	if s.dialect == "mysql" {
-		return "SELECT CAST(UNIX_TIMESTAMP(NOW(6))*1000000 AS SIGNED)"
-	}
-	return "SELECT CAST(EXTRACT(EPOCH FROM clock_timestamp())*1000000 AS BIGINT)"
-}
 
 // SyncPresence atomically refreshes a replica lease and reconciles its complete
 // snapshot. Stable connections are not rewritten; expired replicas are invisible.
@@ -27,39 +21,30 @@ func (s *Store) SyncPresence(ctx context.Context, instance string, clients []cli
 	if instance == "" || len(instance) > 36 || ttl <= 0 {
 		return fmt.Errorf("%w: invalid presence lease", config.ErrInvalid)
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
+	tx := s.db.WithContext(ctx).Begin()
+	if tx.Error != nil {
+		return tx.Error
 	}
 	defer tx.Rollback()
-	var now int64
-	if err = tx.QueryRowContext(ctx, s.clockQuery()).Scan(&now); err != nil {
-		return err
-	}
-	q := "INSERT INTO client_instances(id,refreshed_at,expires_at) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET refreshed_at=EXCLUDED.refreshed_at,expires_at=EXCLUDED.expires_at"
-	if s.dialect == "mysql" {
-		q = "INSERT INTO client_instances(id,refreshed_at,expires_at) VALUES(?,?,?) ON DUPLICATE KEY UPDATE refreshed_at=VALUES(refreshed_at),expires_at=VALUES(expires_at)"
-	}
-	if _, err = tx.ExecContext(ctx, s.query(q), instance, now, now+ttl.Microseconds()); err != nil {
-		return err
-	}
-	rows, err := tx.QueryContext(ctx, s.query("SELECT id,fingerprint FROM connected_clients WHERE instance_id=?"), instance)
+	now, err := s.databaseTime(tx)
 	if err != nil {
+		return err
+	}
+	if err = tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"refreshed_at", "expires_at"}),
+	}).Create(&instanceRow{ID: instance, RefreshedAt: now, ExpiresAt: now + ttl.Microseconds()}).Error; err != nil {
+		return err
+	}
+	var previousRows []clientRow
+	if err = tx.Select("id", "fingerprint").Where(map[string]any{"instance_id": instance}).Find(&previousRows).Error; err != nil {
 		return err
 	}
 	previous := map[string]string{}
-	for rows.Next() {
-		var id, fingerprint string
-		if err = rows.Scan(&id, &fingerprint); err != nil {
-			break
-		}
-		previous[id] = fingerprint
-	}
-	if err = errorsJoinRows(err, rows); err != nil {
-		return err
+	for _, row := range previousRows {
+		previous[row.ID] = row.Fingerprint
 	}
 	seen := map[string]bool{}
-	clientArgs, tagArgs := []any{}, []any{}
+	clientRows, tagRows := []clientRow{}, []tagRow{}
 	removals := []string{}
 	batchBytes := 0
 	// Bounded bulk writes keep connection churn from turning each tag into a
@@ -68,35 +53,26 @@ func (s *Store) SyncPresence(ctx context.Context, instance string, clients []cli
 		if len(ids) == 0 {
 			return nil
 		}
-		args := []any{instance}
-		for _, id := range ids {
-			args = append(args, id)
-		}
-		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
-		_, e := tx.ExecContext(ctx, s.query("DELETE FROM connected_clients WHERE instance_id=? AND id IN ("+placeholders+")"), args...)
-		return e
-	}
-	insertRows := func(prefix string, columns int, args []any) error {
-		if len(args) == 0 {
-			return nil
-		}
-		row := "(" + strings.TrimSuffix(strings.Repeat("?,", columns), ",") + ")"
-		_, e := tx.ExecContext(ctx, s.query(prefix+strings.TrimSuffix(strings.Repeat(row+",", len(args)/columns), ",")), args...)
-		return e
+		return tx.Where(map[string]any{"instance_id": instance}).
+			Where(clause.IN{Column: "id", Values: stringValues(ids)}).Delete(&clientRow{}).Error
 	}
 	flush := func() error {
 		if e := deleteClients(removals); e != nil {
 			return e
 		}
-		if e := insertRows("INSERT INTO connected_clients(id,instance_id,fingerprint,snapshot_json) VALUES ", 4, clientArgs); e != nil {
-			return e
+		if len(clientRows) > 0 {
+			if e := tx.Create(&clientRows).Error; e != nil {
+				return e
+			}
 		}
-		if e := insertRows("INSERT INTO client_tags(client_id,name,value) VALUES ", 3, tagArgs); e != nil {
-			return e
+		if len(tagRows) > 0 {
+			if e := tx.Create(&tagRows).Error; e != nil {
+				return e
+			}
 		}
 		removals = nil
-		clientArgs = nil
-		tagArgs = nil
+		clientRows = nil
+		tagRows = nil
 		batchBytes = 0
 		return nil
 	}
@@ -119,10 +95,10 @@ func (s *Store) SyncPresence(ctx context.Context, instance string, clients []cli
 			continue
 		}
 		removals = append(removals, c.ID)
-		clientArgs = append(clientArgs, c.ID, instance, fingerprint, string(raw))
+		clientRows = append(clientRows, clientRow{ID: c.ID, InstanceID: instance, Fingerprint: fingerprint, SnapshotJSON: string(raw)})
 		batchBytes += len(raw)
 		for name, value := range c.Tags {
-			tagArgs = append(tagArgs, c.ID, []byte(name), []byte(value))
+			tagRows = append(tagRows, tagRow{ClientID: c.ID, Name: []byte(name), Value: []byte(value)})
 		}
 		if len(removals) >= 32 || batchBytes >= 256<<10 {
 			if err = flush(); err != nil {
@@ -147,12 +123,19 @@ func (s *Store) SyncPresence(ctx context.Context, instance string, clients []cli
 	if err = deleteClients(removals); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return tx.Commit().Error
+}
+
+func stringValues(values []string) []any {
+	result := make([]any, len(values))
+	for i, value := range values {
+		result[i] = value
+	}
+	return result
 }
 
 func (s *Store) RemovePresence(ctx context.Context, instance string) error {
-	_, err := s.db.ExecContext(ctx, s.query("DELETE FROM client_instances WHERE id=?"), instance)
-	return err
+	return s.db.WithContext(ctx).Where(map[string]any{"id": instance}).Delete(&instanceRow{}).Error
 }
 
 func (s *Store) Clients(ctx context.Context, after string, limit int) (clientinfo.Page, error) {
@@ -160,29 +143,32 @@ func (s *Store) Clients(ctx context.Context, after string, limit int) (clientinf
 	if limit < 1 || limit > 100 || len(after) > 36 {
 		return page, fmt.Errorf("%w: invalid client page", config.ErrInvalid)
 	}
-	var now int64
-	if err := s.db.QueryRowContext(ctx, s.clockQuery()).Scan(&now); err != nil {
-		return page, err
-	}
-	rows, err := s.db.QueryContext(ctx, s.query("SELECT c.snapshot_json,i.refreshed_at FROM connected_clients c JOIN client_instances i ON i.id=c.instance_id WHERE i.expires_at>? AND c.id>? ORDER BY c.id LIMIT ?"), now, after, limit+1)
+	db := s.db.WithContext(ctx)
+	now, err := s.databaseTime(db)
 	if err != nil {
 		return page, err
 	}
-	for rows.Next() {
-		var raw string
-		var refreshed int64
-		var c clientinfo.Client
-		if err = rows.Scan(&raw, &refreshed); err != nil {
-			break
-		}
-		if err = json.Unmarshal([]byte(raw), &c); err != nil {
-			break
-		}
-		c.RefreshedAt = time.UnixMicro(refreshed).UTC()
-		page.Clients = append(page.Clients, c)
+	var rows []struct {
+		SnapshotJSON string `gorm:"column:snapshot_json"`
+		RefreshedAt  int64
 	}
-	if err = errorsJoinRows(err, rows); err != nil {
+	err = db.Table("connected_clients AS c").Select("c.snapshot_json", "i.refreshed_at").Clauses(clause.From{
+		Tables: []clause.Table{{Name: "connected_clients", Alias: "c"}},
+		Joins: []clause.Join{{Type: clause.InnerJoin, Table: clause.Table{Name: "client_instances", Alias: "i"},
+			ON: clause.Where{Exprs: []clause.Expression{clause.Eq{Column: column("i", "id"), Value: column("c", "instance_id")}}}}},
+	}).Where(clause.Gt{Column: column("i", "expires_at"), Value: now}).
+		Where(clause.Gt{Column: column("c", "id"), Value: after}).
+		Order(clause.OrderByColumn{Column: column("c", "id")}).Limit(limit + 1).Scan(&rows).Error
+	if err != nil {
 		return page, err
+	}
+	for _, row := range rows {
+		var c clientinfo.Client
+		if err = json.Unmarshal([]byte(row.SnapshotJSON), &c); err != nil {
+			return page, err
+		}
+		c.RefreshedAt = time.UnixMicro(row.RefreshedAt).UTC()
+		page.Clients = append(page.Clients, c)
 	}
 	if len(page.Clients) > limit {
 		page.Clients = page.Clients[:limit]
@@ -197,40 +183,38 @@ func (s *Store) TagSuggestions(ctx context.Context, tag, prefix string) ([]strin
 	if len(tag) > 128 || len(prefix) > 512 {
 		return nil, fmt.Errorf("%w: invalid suggestion query", config.ErrInvalid)
 	}
-	var now int64
-	if err := s.db.QueryRowContext(ctx, s.clockQuery()).Scan(&now); err != nil {
+	db := s.db.WithContext(ctx)
+	now, err := s.databaseTime(db)
+	if err != nil {
 		return nil, err
 	}
-	column := "t.name"
+	field := column("t", "name")
 	if tag != "" {
-		column = "t.value"
+		field.Name = "value"
 	}
-	pattern := "? ESCAPE '!'"
-	if s.dialect == "postgres" {
-		pattern = "?::bytea ESCAPE '!'::bytea"
-	}
-	q := "SELECT DISTINCT " + column + " FROM client_tags t JOIN connected_clients c ON c.id=t.client_id JOIN client_instances i ON i.id=c.instance_id WHERE i.expires_at>? AND " + column + " LIKE " + pattern
-	escape := strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(prefix) + "%"
-	args := []any{now, []byte(escape)}
+	query := db.Table("client_tags AS t").Clauses(clause.From{
+		Tables: []clause.Table{{Name: "client_tags", Alias: "t"}},
+		Joins: []clause.Join{
+			{Type: clause.InnerJoin, Table: clause.Table{Name: "connected_clients", Alias: "c"},
+				ON: clause.Where{Exprs: []clause.Expression{clause.Eq{Column: column("c", "id"), Value: column("t", "client_id")}}}},
+			{Type: clause.InnerJoin, Table: clause.Table{Name: "client_instances", Alias: "i"},
+				ON: clause.Where{Exprs: []clause.Expression{clause.Eq{Column: column("i", "id"), Value: column("c", "instance_id")}}}},
+		},
+	}).Where(clause.Gt{Column: column("i", "expires_at"), Value: now}).Where(s.tagPrefix(field, prefix))
 	if tag != "" {
-		q += " AND t.name=?"
-		args = append(args, []byte(tag))
+		query = query.Where(clause.Eq{Column: column("t", "name"), Value: []byte(tag)})
 	}
-	q += " ORDER BY " + column + " LIMIT 100"
-	rows, err := s.db.QueryContext(ctx, s.query(q), args...)
+	var rows []struct{ Value []byte }
+	selected := field
+	selected.Alias = "value"
+	err = query.Clauses(clause.Select{Distinct: true, Columns: []clause.Column{selected}}).
+		Order(clause.OrderByColumn{Column: field}).Limit(100).Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}
 	suggestions := map[string]bool{}
-	for rows.Next() {
-		var value string
-		if err = rows.Scan(&value); err != nil {
-			break
-		}
-		suggestions[value] = true
-	}
-	if err = errorsJoinRows(err, rows); err != nil {
-		return nil, err
+	for _, row := range rows {
+		suggestions[string(row.Value)] = true
 	}
 	if tag == "" {
 		for _, name := range []string{"sys.ip", "sys.hostname"} {
@@ -272,27 +256,18 @@ func (s *Store) TagSuggestions(ctx context.Context, tag, prefix string) ([]strin
 // CleanupPresence removes a bounded batch of abandoned replicas. A refreshed
 // lease is rechecked at deletion so a concurrent heartbeat is not removed.
 func (s *Store) CleanupPresence(ctx context.Context) error {
-	var now int64
-	if err := s.db.QueryRowContext(ctx, s.clockQuery()).Scan(&now); err != nil {
-		return err
-	}
-	rows, err := s.db.QueryContext(ctx, s.query("SELECT id FROM client_instances WHERE expires_at<=? ORDER BY expires_at LIMIT 32"), now)
+	db := s.db.WithContext(ctx)
+	now, err := s.databaseTime(db)
 	if err != nil {
 		return err
 	}
-	ids := []string{}
-	for rows.Next() {
-		var id string
-		if err = rows.Scan(&id); err != nil {
-			break
-		}
-		ids = append(ids, id)
-	}
-	if err = errorsJoinRows(err, rows); err != nil {
+	var ids []string
+	if err = db.Model(&instanceRow{}).Where(clause.Lte{Column: "expires_at", Value: now}).
+		Order("expires_at").Limit(32).Pluck("id", &ids).Error; err != nil {
 		return err
 	}
 	for _, id := range ids {
-		if _, err = s.db.ExecContext(ctx, s.query("DELETE FROM client_instances WHERE id=? AND expires_at<=?"), id, now); err != nil {
+		if err = db.Where(map[string]any{"id": id}).Where(clause.Lte{Column: "expires_at", Value: now}).Delete(&instanceRow{}).Error; err != nil {
 			return err
 		}
 	}

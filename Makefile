@@ -14,7 +14,24 @@ test: go-mod-download
 	go test $(SERVER_PACKAGES)
 
 test-unit:
-	go test ./internal/config
+	go test -count=1 ./internal/config ./internal/settings
+	$(MAKE) sdk-unit
+
+sdk-unit:
+	go -C sdk/go test -race -short -count=1 ./...
+	$(SDK_PYTHON) -m unittest discover -s sdk/python/tests -p test_client.py -v
+
+# Disposable PostgreSQL and three real instances; no deployment data is used.
+test-full:
+	python3 tests/run.py --python $(abspath $(SDK_PYTHON)) --coverage-gates
+
+# Public API/SDK tests against supplied running instances; credentials are env-only.
+test-system:
+	go -C tests/system run -race .
+
+test-fuzz:
+	CGO_ENABLED=1 go test ./internal/config -run '^$$' -fuzz '^FuzzIPSingletonRange$$' -fuzztime=5s -parallel=2
+	CGO_ENABLED=1 go test ./internal/config -run '^$$' -fuzz '^FuzzNamesAndTextValidation$$' -fuzztime=5s -parallel=2
 
 test-integration:
 	@test -n "$(CONFHUB_TEST_POSTGRES_DSN)" || (echo "CONFHUB_TEST_POSTGRES_DSN is required"; exit 1)
@@ -59,6 +76,8 @@ sdk-check:
 	go -C sdk/go vet ./...
 	$(SDK_PYTHON) -m mypy --config-file sdk/python/pyproject.toml sdk/python/src/confhub
 	$(SDK_PYTHON) -m ruff check --config sdk/python/pyproject.toml sdk/python/src sdk/python/tests sdk/test-integration.py
+	$(SDK_PYTHON) -m ruff check --config sdk/python/pyproject.toml tests
+	go -C tests/system vet ./...
 
 sdk-integration:
 	python3 sdk/test-integration.py --python $(abspath $(SDK_PYTHON))
@@ -71,4 +90,4 @@ docker-image-build-local:
 		--build-arg IMAGE_TAG=$(IMAGE_TAG) \
 		-t $(DOCKER_IMAGE):$(IMAGE_TAG) .
 
-.PHONY: go-mod-download test test-unit test-integration test-race vet build run clean docker-image-build-local frontend-install frontend-build frontend-test frontend-check frontend-e2e sdk-test sdk-check sdk-integration
+.PHONY: go-mod-download test test-unit test-integration test-race vet build run clean docker-image-build-local frontend-install frontend-build frontend-test frontend-check frontend-e2e sdk-test sdk-check sdk-integration sdk-unit test-full test-system test-fuzz

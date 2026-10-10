@@ -19,6 +19,9 @@ import (
 // This test uses only public management and SDK interfaces. The runner starts
 // two real ConfHub processes sharing a disposable PostgreSQL database.
 func TestRealServerIntegration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("real-server integration is outside the unit suite")
+	}
 	address := os.Getenv("CONFHUB_SDK_TEST_URL")
 	if address == "" {
 		t.Skip("run sdk/test-integration.py to start an isolated real server")
