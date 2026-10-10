@@ -3,11 +3,13 @@ x-app: &app
   build: .
   image: confhub:dev
   restart: unless-stopped
+  env_file:
+    - .env
   environment:
     CONFHUB_DATABASE: mysql
-    CONFHUB_DSN: confhub:${CONFHUB_DB_PASSWORD:?set CONFHUB_DB_PASSWORD}@tcp(db:3306)/confhub
-    CONFHUB_ADMIN_PASSWORD: ${CONFHUB_ADMIN_PASSWORD:?set CONFHUB_ADMIN_PASSWORD}
-    CONFHUB_JWT_SECRET: ${CONFHUB_JWT_SECRET:?set CONFHUB_JWT_SECRET}
+    CONFHUB_DSN: confhub:${CONFHUB_DB_PASSWORD:?set CONFHUB_DB_PASSWORD in .env}@tcp(db:3306)/confhub
+    CONFHUB_ADMIN_PASSWORD: ${CONFHUB_ADMIN_PASSWORD:?set CONFHUB_ADMIN_PASSWORD in .env}
+    CONFHUB_JWT_SECRET: ${CONFHUB_JWT_SECRET:?set CONFHUB_JWT_SECRET in .env}
   depends_on:
     db:
       condition: service_healthy
@@ -23,8 +25,8 @@ services:
     environment:
       MYSQL_DATABASE: confhub
       MYSQL_USER: confhub
-      MYSQL_PASSWORD: ${CONFHUB_DB_PASSWORD:?set CONFHUB_DB_PASSWORD}
-      MYSQL_ROOT_PASSWORD: ${CONFHUB_DB_ROOT_PASSWORD:?set CONFHUB_DB_ROOT_PASSWORD}
+      MYSQL_PASSWORD: ${CONFHUB_DB_PASSWORD:?set CONFHUB_DB_PASSWORD in .env}
+      MYSQL_ROOT_PASSWORD: ${CONFHUB_DB_ROOT_PASSWORD:?set CONFHUB_DB_ROOT_PASSWORD in .env}
     volumes: ["mysql-data:/var/lib/mysql"]
     restart: unless-stopped
     healthcheck:
