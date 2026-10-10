@@ -9,6 +9,7 @@ import socket
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from types import TracebackType
+from typing import Protocol
 from urllib.parse import urlsplit
 
 import aiohttp
@@ -17,6 +18,10 @@ from .cache import DiskCache
 from .types import MAX_WIRE_BYTES, Closed, Key, NotFound, Snapshot, Unavailable
 
 Callback = Callable[[Snapshot], Awaitable[None] | None]
+
+
+class _WatchConnection(Protocol):
+    async def close(self) -> bool: ...
 
 
 @dataclass
@@ -81,7 +86,7 @@ class AsyncClient:
         self._lock = asyncio.Lock()
         self.errors: asyncio.Queue[Exception] = asyncio.Queue(maxsize=1)
         self._subscriptions: dict[Key, _Subscription] = {}
-        self._ws: aiohttp.ClientWebSocketResponse | None = None
+        self._ws: _WatchConnection | None = None
         self._watcher: asyncio.Task[None] | None = None
         self._generation = 0
         self._wake = asyncio.Event()
@@ -293,6 +298,7 @@ class AsyncClient:
                     async with session.ws_connect(
                         address + "/api/client/watch",
                         params={"tags": self._tags},
+                        autoping=True,
                         max_msg_size=MAX_WIRE_BYTES,
                         timeout=aiohttp.ClientWSTimeout(ws_receive=35, ws_close=self._timeout),
                     ) as ws:

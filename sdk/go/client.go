@@ -25,24 +25,25 @@ type Options struct {
 }
 
 type Client struct {
-	addresses     []string
-	tags          string
-	timeout       time.Duration
-	http          *http.Client
-	mu            sync.Mutex
-	closed        bool
-	ctx           context.Context
-	cancel        context.CancelFunc
-	records       map[Key]Snapshot
-	cachePath     string
-	errors        chan error
-	subscriptions map[Key]*subscription
-	conn          *websocket.Conn
-	generation    uint64
-	wake          chan struct{}
-	wg            sync.WaitGroup
-	closeOnce     sync.Once
-	done          chan struct{}
+	addresses      []string
+	tags           string
+	timeout        time.Duration
+	http           *http.Client
+	ownedTransport *http.Transport
+	mu             sync.Mutex
+	closed         bool
+	ctx            context.Context
+	cancel         context.CancelFunc
+	records        map[Key]Snapshot
+	cachePath      string
+	errors         chan error
+	subscriptions  map[Key]*subscription
+	conn           *websocket.Conn
+	generation     uint64
+	wake           chan struct{}
+	wg             sync.WaitGroup
+	closeOnce      sync.Once
+	done           chan struct{}
 }
 
 func New(options Options) (*Client, error) {
@@ -80,7 +81,13 @@ func New(options Options) (*Client, error) {
 	}
 	raw, _ := json.Marshal(tags)
 	ctx, cancel := context.WithCancel(context.Background())
-	client := &Client{addresses: addresses, tags: string(raw), timeout: options.Timeout, http: &http.Client{Transport: http.DefaultTransport.(*http.Transport).Clone()}, ctx: ctx, cancel: cancel, records: map[Key]Snapshot{}, errors: make(chan error, 1), subscriptions: map[Key]*subscription{}, wake: make(chan struct{}, 1), done: make(chan struct{})}
+	transport := http.DefaultTransport
+	var ownedTransport *http.Transport
+	if standard, ok := transport.(*http.Transport); ok {
+		ownedTransport = standard.Clone()
+		transport = ownedTransport
+	}
+	client := &Client{addresses: addresses, tags: string(raw), timeout: options.Timeout, http: &http.Client{Transport: transport}, ownedTransport: ownedTransport, ctx: ctx, cancel: cancel, records: map[Key]Snapshot{}, errors: make(chan error, 1), subscriptions: map[Key]*subscription{}, wake: make(chan struct{}, 1), done: make(chan struct{})}
 	if err := client.initCache(options.CacheDir); err != nil {
 		cancel()
 		return nil, err
@@ -194,7 +201,9 @@ func (c *Client) Close(ctx context.Context) error {
 			}
 			c.resetLocked()
 			c.mu.Unlock()
-			c.http.CloseIdleConnections()
+			if c.ownedTransport != nil {
+				c.ownedTransport.CloseIdleConnections()
+			}
 			c.wg.Wait()
 			close(c.done)
 		}()

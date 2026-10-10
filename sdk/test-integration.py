@@ -130,10 +130,15 @@ def main():
                     check=True,
                 )
                 if options.full:
+                    # PostgreSQL bind mounts under data/ may be unreadable.
+                    packages = ["./cmd/...", "./internal/..."]
                     subprocess.run(
-                        ["go", "test", "-race", "-count=1", "./..."], cwd=ROOT, env=env, check=True
+                        ["go", "test", "-race", "-count=1", *packages],
+                        cwd=ROOT,
+                        env=env,
+                        check=True,
                     )
-                    subprocess.run(["go", "vet", "./..."], cwd=ROOT, env=env, check=True)
+                    subprocess.run(["go", "vet", *packages], cwd=ROOT, env=env, check=True)
     finally:
         for process in processes:
             if process.poll() is None:

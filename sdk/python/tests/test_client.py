@@ -241,8 +241,15 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
                         operation.done(),
                         "cancelled cache writer escaped before atomic commit completed",
                     )
+                    closing = asyncio.create_task(client.close())
+                    await asyncio.sleep(0.02)
+                    self.assertFalse(
+                        closing.done(),
+                        "close returned before atomic cache commit completed",
+                    )
                     release.set()
                     await asyncio.gather(operation, return_exceptions=True)
+                    await asyncio.wait_for(closing, 2)
             finally:
                 release.set()
                 await client.close()

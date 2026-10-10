@@ -17,6 +17,47 @@ import (
 	confhub "gitlab.bodesitech.com/bodesi/confhub/sdk/go"
 )
 
+type applicationTransport struct {
+	base   http.RoundTripper
+	used   atomic.Bool
+	closed atomic.Bool
+}
+
+func (transport *applicationTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	transport.used.Store(true)
+	return transport.base.RoundTrip(request)
+}
+
+func (transport *applicationTransport) CloseIdleConnections() {
+	transport.closed.Store(true)
+}
+
+func TestClientUsesCustomDefaultTransportWithoutTakingOwnership(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(confhub.Snapshot{Key: confhub.Key{Namespace: "public", Group: "DEFAULT_GROUP", Name: "config"}, Sequence: 1, ID: "config-id", Revision: 1, Version: 1, Content: "value", Format: "text"})
+	}))
+	defer server.Close()
+	original := http.DefaultTransport
+	transport := &applicationTransport{base: original}
+	http.DefaultTransport = transport
+	t.Cleanup(func() { http.DefaultTransport = original })
+	client, err := confhub.New(confhub.Options{Addresses: []string{server.URL}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { client.Close(context.Background()) })
+	value, err := client.Get(context.Background(), confhub.Key{Name: "config"})
+	if err != nil || value.Content != "value" || !transport.used.Load() {
+		t.Fatal("custom default transport was not used", value, err)
+	}
+	if err := client.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if transport.closed.Load() {
+		t.Fatal("closing client closed application-owned transport")
+	}
+}
+
 func TestGetFailsOverAndPreservesRawContent(t *testing.T) {
 	unavailable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(503) }))
 	defer unavailable.Close()
