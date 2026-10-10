@@ -2,7 +2,7 @@
 
 轻量配置中心，使用 Go/Gin、React、HTTP GET 与 WebSocket。支持不可变版本、全量/灰度发布、回退、乐观锁、单 admin JWT 登录，以及 PostgreSQL/MySQL 存储。
 
-需求与架构见 [docs/requirements.md](docs/requirements.md) 和 [docs/architecture.md](docs/architecture.md)，接口见 [docs/backend-api.md](docs/backend-api.md)，控制台交互和验证见 [docs/frontend-implementation.md](docs/frontend-implementation.md)。Go/Python SDK 尚未实现。性能目标尚未压测。
+需求与架构见 [docs/requirements.md](docs/requirements.md) 和 [docs/architecture.md](docs/architecture.md)，接口见 [docs/backend-api.md](docs/backend-api.md)，控制台交互和验证见 [docs/frontend-implementation.md](docs/frontend-implementation.md)。[Go/Python SDK](docs/sdk.md) 支持获取、订阅、自动重连和可选离线缓存。性能目标尚未压测。
 
 ## 启动
 

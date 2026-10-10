@@ -21,3 +21,11 @@ frontend/dist/
 frontend/*.tsbuildinfo
 frontend/test-results/
 frontend/playwright-report/
+
+sdk/python/.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/

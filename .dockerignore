@@ -20,4 +20,10 @@ frontend/dist
 frontend/test-results
 frontend/playwright-report
 frontend/*.tsbuildinfo
+sdk/python/.venv
+**/__pycache__
+**/*.egg-info
+.mypy_cache
+.pytest_cache
+.ruff_cache
 README.md

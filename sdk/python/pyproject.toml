@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "confhub-sdk"
+version = "0.1.0"
+description = "ConfHub raw configuration client with sync and asyncio APIs"
+requires-python = ">=3.10"
+dependencies = ["aiohttp>=3.12,<4"]
+readme = "README.md"
+
+[project.optional-dependencies]
+dev = ["mypy>=1.15,<2", "ruff>=0.11,<1"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/confhub"]
+
+[tool.mypy]
+strict = true
+files = ["src/confhub"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP"]
