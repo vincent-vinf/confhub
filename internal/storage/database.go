@@ -22,7 +22,7 @@ import (
 //go:embed migrations/*/*.sql
 var migrations embed.FS
 
-const SchemaVersion = 3
+const SchemaVersion = 4
 
 type Store struct {
 	db      *sql.DB
@@ -135,8 +135,8 @@ func Migrate(dialect, dsn string, initializeOnly bool) (err error) {
 	if dirty {
 		return fmt.Errorf("database schema version %d is dirty; repair schema before migration", version)
 	}
-	if err == nil && version == 1 {
-		return fmt.Errorf("legacy schema 1 is unsupported by the mutable beta model; recreate an empty database instead of migrating existing configuration data")
+	if err == nil && version >= 1 && version <= 3 {
+		return fmt.Errorf("legacy schema %d is unsupported by the shared beta model; recreate an empty database instead of migrating existing configuration data", version)
 	}
 
 	if initializeOnly && err == nil {

@@ -41,6 +41,7 @@ class Snapshot:
     deleted: bool = False
     rule_id: str = ""
     source: Source = "online"
+    beta: bool = False
 
     @classmethod
     def from_dict(cls, raw: object) -> "Snapshot":
@@ -65,9 +66,17 @@ class Snapshot:
                 raise ValueError("invalid configuration text")
             strings[field] = value
         deleted = raw.get("deleted", False)
+        beta = raw.get("beta", False)
+        if type(beta) is not bool:
+            raise ValueError("invalid beta marker")
         if type(deleted) is not bool or len(strings["content"].encode()) > 1 << 20:
             raise ValueError("invalid configuration snapshot")
-        if not deleted and (not strings["id"] or numbers["version"] < 1 or not strings["format"]):
+        valid_version = (
+            numbers["version"] == 0 and bool(strings["rule_id"])
+            if beta
+            else numbers["version"] >= 1
+        )
+        if not deleted and (not strings["id"] or not valid_version or not strings["format"]):
             raise ValueError("invalid live configuration snapshot")
         return cls(
             key=key,
@@ -79,6 +88,7 @@ class Snapshot:
             format=strings["format"],
             rule_id=strings["rule_id"],
             deleted=deleted,
+            beta=beta,
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -92,6 +102,7 @@ class Snapshot:
             "format": self.format,
             "rule_id": self.rule_id,
             "deleted": self.deleted,
+            "beta": self.beta,
         }
 
     def with_source(self, source: Source) -> "Snapshot":

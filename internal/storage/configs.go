@@ -49,6 +49,16 @@ func (s *Store) load(ctx context.Context, r reader, k config.Key) (*config.State
 	if err != nil {
 		return nil, storageError(err)
 	}
+	var betaRaw string
+	err = r.QueryRowContext(ctx, s.query("SELECT beta_json FROM config_beta WHERE config_id=?"), state.ID).Scan(&betaRaw)
+	if err == nil {
+		state.Beta = &config.Beta{}
+		if err = json.Unmarshal([]byte(betaRaw), state.Beta); err != nil {
+			return nil, err
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
 	rows, err := r.QueryContext(ctx, s.query("SELECT rule_json FROM gray_rules WHERE config_id=? ORDER BY position"), state.ID)
 	if err != nil {
 		return nil, err
@@ -167,6 +177,9 @@ func (s *Store) Save(ctx context.Context, k config.Key, edit config.Edit) (confi
 	if err := k.Validate(); err != nil {
 		return config.Mutation{}, err
 	}
+	if edit.Target != "" && edit.Target != "global" && edit.Target != "beta" {
+		return config.Mutation{}, fmt.Errorf("%w: target must be global or beta", config.ErrInvalid)
+	}
 	if err := config.ValidateContent(edit.Format, edit.Content); err != nil {
 		return config.Mutation{}, err
 	}
@@ -180,7 +193,7 @@ func (s *Store) Save(ctx context.Context, k config.Key, edit config.Edit) (confi
 	defer tx.Rollback()
 	state, err := s.load(ctx, tx, k)
 	if errors.Is(err, config.ErrNotFound) {
-		if edit.ExpectedID != "" || edit.ExpectedRevision != 0 || edit.RuleID != "" {
+		if edit.ExpectedID != "" || edit.ExpectedRevision != 0 || edit.Target == "beta" {
 			return config.Mutation{}, config.ErrConflict
 		}
 		state = &config.State{ID: uuid.NewString(), Key: k, Revision: 1, LastVersion: 1, GlobalVersion: 1, Rules: []config.Rule{}, Versions: map[int64]config.Version{}}
@@ -196,22 +209,16 @@ func (s *Store) Save(ctx context.Context, k config.Key, edit config.Edit) (confi
 			return config.Mutation{}, err
 		}
 
-		if edit.RuleID != "" {
-			index := -1
-			for i, r := range state.Rules {
-				if r.ID == edit.RuleID {
-					index = i
-					break
-				}
-			}
-			if index < 0 {
+		if edit.Target == "beta" {
+			if state.Beta == nil {
 				return config.Mutation{}, config.ErrNotFound
 			}
-			beta := &state.Rules[index].Beta
+			beta := state.Beta
 			if beta.Content == edit.Content && beta.Format == edit.Format && beta.Description == edit.Description {
 				return config.Mutation{State: state}, nil
 			}
 			beta.Content, beta.Format, beta.Description = edit.Content, edit.Format, edit.Description
+			beta.UpdatedAt = time.Now().UTC()
 			state.Revision++
 			if err = s.persistTargets(ctx, tx, state); err != nil {
 				return config.Mutation{}, err
@@ -243,6 +250,18 @@ func (s *Store) persistTargets(ctx context.Context, tx *sql.Tx, state *config.St
 	_, err := tx.ExecContext(ctx, s.query("UPDATE configs SET revision=?,last_version=?,global_version=? WHERE id=?"), state.Revision, state.LastVersion, state.GlobalVersion, state.ID)
 	if err != nil {
 		return err
+	}
+	if _, err = tx.ExecContext(ctx, s.query("DELETE FROM config_beta WHERE config_id=?"), state.ID); err != nil {
+		return err
+	}
+	if state.Beta != nil {
+		raw, e := json.Marshal(state.Beta)
+		if e != nil {
+			return e
+		}
+		if _, err = tx.ExecContext(ctx, s.query("INSERT INTO config_beta(config_id,beta_json) VALUES(?,?)"), state.ID, string(raw)); err != nil {
+			return err
+		}
 	}
 	_, err = tx.ExecContext(ctx, s.query("DELETE FROM gray_rules WHERE config_id=?"), state.ID)
 	if err != nil {

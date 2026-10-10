@@ -64,6 +64,9 @@ func (c *stateCache) load(ctx context.Context, k config.Key, source Source) (*co
 			size := int64(512 + len(k.Namespace) + len(k.Group) + len(k.Name))
 			raw, _ := json.Marshal(state.Rules)
 			size += int64(len(raw)) * 2
+			if state.Beta != nil {
+				size += int64(len(state.Beta.Content) + len(state.Beta.Description) + 256)
+			}
 			for _, v := range state.Versions {
 				size += int64(len(v.Content) + len(v.Description) + 256)
 			}

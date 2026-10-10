@@ -31,7 +31,7 @@ async function save(
       expected_revision: previous?.revision ?? 0,
       content,
       format: 'json',
-      rule_id: ruleId,
+      target: ruleId ? 'beta' : undefined,
       description: '',
       confirmed: true,
     },
@@ -127,7 +127,7 @@ test('历史查看、任意版本比较、切换比较保持保存基准、回�
   expect(s.versions[4].description).toBeTruthy()
 })
 
-test('独立 beta 原位编辑、前后 diff、主历史、转全量及关闭重开删除', async ({ page }, testInfo) => {
+test('共享 beta 原位编辑、前后 diff、主历史、转全量及关闭重开删除', async ({ page }, testInfo) => {
   await login(page)
   const name = 'gray.json'
   let s = await save(page.request, name, '{"v":1}')
@@ -143,15 +143,15 @@ test('独立 beta 原位编辑、前后 diff、主历史、转全量及关闭重
   await page.getByLabel('试算标签 1 名称').fill('env')
   await page.getByLabel('试算标签 1 值').fill('gray')
   await page.getByRole('button', { name: '开始试算' }).click()
-  await expect(page.locator('.simulation-version')).toHaveText('v2-beta')
+  await expect(page.locator('.simulation-version')).toHaveText('beta')
   await page.getByRole('tab', { name: '配置内容' }).click()
   await edit(page, '{"v":3}')
   await page.getByRole('button', { name: '保存并发布' }).click()
   await confirm(page)
   s = await state(page.request, name)
   expect(s.global_version).toBe(3)
-  expect(s.rules[0].beta.base_version).toBe(2)
-  await page.getByLabel('编辑目标', { exact: true }).selectOption(s.rules[0].id)
+  expect(s.beta.content).toBe('{"v":2}')
+  await page.getByLabel('编辑目标', { exact: true }).selectOption('beta')
   await expect(page.getByRole('textbox', { name: '配置内容', exact: true })).toHaveText('{"v":2}')
   for (const [before, after] of [
     [2, 4],
@@ -163,7 +163,7 @@ test('独立 beta 原位编辑、前后 diff、主历史、转全量及关闭重
     }
     await edit(page, `{"v":${after}}`)
     await page.getByRole('button', { name: '保存并发布' }).click()
-    await expect(page.getByRole('dialog')).toContainText('更新临时版本 v2-beta')
+    await expect(page.getByRole('dialog')).toContainText('更新 beta 配置（无编号）')
     await expect(page.getByLabel('对比版本', { exact: true })).toHaveCount(0)
     if (after === 5) {
       await expect
@@ -198,12 +198,13 @@ test('独立 beta 原位编辑、前后 diff、主历史、转全量及关闭重
     s = await state(page.request, name)
     expect(s.global_version).toBe(3)
     expect(s.last_version).toBe(3)
-    expect(s.rules[0].beta).toMatchObject({ base_version: 2, content: `{"v":${after}}` })
+    expect(s.beta).toMatchObject({ content: `{"v":${after}}` })
   }
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.getByRole('tab', { name: '版本历史' }).click()
   await expect(page.getByLabel('回退目标', { exact: true })).toHaveCount(0)
-  await expect(page.locator('tbody tr')).toHaveCount(3)
+  await expect(page.locator('tbody tr')).toHaveCount(4)
+  await expect(page.locator('tbody tr').first()).toContainText('beta')
   await page.getByRole('tab', { name: '灰度规则' }).click()
   await page.getByLabel('试算标签 1 名称').fill('env')
   await page.getByLabel('试算标签 1 值').fill('gray')
@@ -222,8 +223,8 @@ test('独立 beta 原位编辑、前后 diff、主历史、转全量及关闭重
   await page.getByRole('button', { name: '启用规则 预发布', exact: true }).click()
   await confirmRule(page)
   await page.getByRole('button', { name: '开始试算' }).click()
-  await expect(page.locator('.simulation-version')).toHaveText('v2-beta')
-  expect((await state(page.request, name)).rules[0].beta.content).toBe('{"v":5}')
+  await expect(page.locator('.simulation-version')).toHaveText('beta')
+  expect((await state(page.request, name)).beta.content).toBe('{"v":5}')
   await page.getByRole('button', { name: '删除规则 预发布', exact: true }).click()
   await confirmRule(page)
   expect((await state(page.request, name)).rules).toEqual([])
@@ -391,7 +392,7 @@ test('浅深主题、响应式、键盘导航与无障碍检查', async ({ page 
     .toBe(true)
 })
 
-test('多条件规则编辑重排、独立 beta 及主版本回退保留灰度和草稿', async ({ page }) => {
+test('多条件规则编辑重排、共享 beta 及主版本回退保留灰度和草稿', async ({ page }) => {
   await login(page)
   const name = 'rule-order.json'
   let s = await save(page.request, name, '{"v":1}')
@@ -417,7 +418,13 @@ test('多条件规则编辑重排、独立 beta 及主版本回退保留灰度�
     (
       await page.request.put(`${path(name)}/rules`, {
         headers: { Origin: origin },
-        data: { expected_id: s.id, expected_revision: s.revision, rules, confirmed: true },
+        data: {
+          expected_id: s.id,
+          expected_revision: s.revision,
+          rules,
+          source_version: s.global_version,
+          confirmed: true,
+        },
       })
     ).ok(),
   ).toBeTruthy()
@@ -428,18 +435,18 @@ test('多条件规则编辑重排、独立 beta 及主版本回退保留灰度�
   await page.getByLabel('试算标签 1 名称').fill('env')
   await page.getByLabel('试算标签 1 值').fill('gray')
   await page.getByRole('button', { name: '开始试算' }).click()
-  await expect(page.locator('.simulation-version')).toHaveText('v2-beta')
+  await expect(page.locator('.simulation-version')).toHaveText('beta')
   await expect(page.locator('.simulation-result p')).toHaveText('规则二')
   await page.getByRole('button', { name: '添加标签', exact: true }).click()
   await page.getByLabel('试算标签 2 名称').fill('region')
   await page.getByLabel('试算标签 2 值').fill('east')
   await page.getByRole('button', { name: '开始试算' }).click()
-  await expect(page.locator('.simulation-version')).toHaveText('v2-beta')
+  await expect(page.locator('.simulation-version')).toHaveText('beta')
   await expect(page.locator('.simulation-result p')).toHaveText('规则一')
   await page.getByRole('button', { name: '上移规则 规则二', exact: true }).click()
   await confirmRule(page)
   await page.getByRole('button', { name: '开始试算' }).click()
-  await expect(page.locator('.simulation-version')).toHaveText('v2-beta')
+  await expect(page.locator('.simulation-version')).toHaveText('beta')
   await expect(page.locator('.simulation-result p')).toHaveText('规则二')
   await page.getByRole('button', { name: '修改规则 规则一', exact: true }).click()
   await page.getByLabel('条件 1 标签值 2', { exact: true }).fill('preview')
@@ -457,8 +464,8 @@ test('多条件规则编辑重排、独立 beta 及主版本回退保留灰度�
   await confirm(page, '确认回退并发布')
   s = await state(page.request, name)
   expect(s.global_version).toBe(3)
-  expect(s.rules[0].beta).toMatchObject({ base_version: 2, content: '{"rule":"second"}' })
-  expect(s.rules[1].beta).toMatchObject({ base_version: 2, content: '{"rule":"first"}' })
+  expect(s.beta).toMatchObject({ content: '{"rule":"second"}' })
+  expect(s.rules.every((rule: Record<string, unknown>) => !('beta' in rule))).toBeTruthy()
   await page.getByRole('tab', { name: '配置内容' }).click()
   await expect(page.getByRole('textbox', { name: '配置内容', exact: true })).toHaveText(
     '{"v":"kept draft"}',
@@ -556,6 +563,7 @@ test('同名 beta 并发冲突重新比较当前正文，保留草稿且不创�
       expected_id: s.id,
       expected_revision: s.revision,
       confirmed: true,
+      source_version: s.global_version,
       rules: [
         {
           id: 'beta',
@@ -584,7 +592,7 @@ test('同名 beta 并发冲突重新比较当前正文，保留草稿且不创�
   await confirm(page)
   s = await state(page.request, name)
   expect(s.last_version).toBe(1)
-  expect(s.rules[0].beta).toMatchObject({ base_version: 1, content: '{"v":"draft"}' })
+  expect(s.beta).toMatchObject({ content: '{"v":"draft"}' })
   await expect(page.getByRole('button', { name: '保存并发布' })).toBeDisabled()
 })
 
@@ -598,6 +606,7 @@ test('灰度转全量冲突后重新核对最新 beta 内容', async ({ page }) 
       expected_id: s.id,
       expected_revision: s.revision,
       confirmed: true,
+      source_version: s.global_version,
       rules: [
         {
           id: 'beta',
@@ -626,7 +635,7 @@ test('灰度转全量冲突后重新核对最新 beta 内容', async ({ page }) 
   expect(s.rules[0].enabled).toBe(true)
 })
 
-test('新建灰度规则遇全量并发更新后确认最新创建来源', async ({ page }) => {
+test('新建灰度规则遇全量并发更新仍保留显式复制来源', async ({ page }) => {
   await login(page)
   const name = 'rule-create-conflict.json'
   let s = await save(page.request, name, '{"v":1}')
@@ -641,10 +650,10 @@ test('新建灰度规则遇全量并发更新后确认最新创建来源', async
   await page.getByRole('button', { name: '确认生效', exact: true }).click()
   await expect(page.getByRole('alert')).toContainText('被其他人修改')
   await page.getByRole('button', { name: '读取最新规则并保留当前编辑' }).click()
-  await expect(page.locator('.rule-comparison').getByText('v2-beta', { exact: true })).toBeVisible()
+  await expect(page.getByRole('dialog')).toContainText('从主版本 v1 复制')
   await confirmRule(page)
   s = await state(page.request, name)
-  expect(s.rules[0].beta).toMatchObject({ base_version: 2, content: '{"v":2}' })
+  expect(s.beta).toMatchObject({ content: '{"v":1}' })
 })
 
 test('在线客户端只读展示、标签补全与 IP 区间规则', async ({ page }) => {
@@ -722,7 +731,7 @@ test('在线客户端只读展示、标签补全与 IP 区间规则', async ({ p
   await page.getByRole('button', { name: '打开导航' }).click()
   await page.getByRole('link', { name: '在线客户端', exact: true }).click()
   await expect(card).toBeVisible()
-  await expect(card).toContainText('v1-beta', { timeout: 15000 })
+  await expect(card).toContainText('beta', { timeout: 15000 })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy()
   await page.getByRole('button', { name: '切换深色主题' }).click()
   await expect(page.getByRole('button', { name: '刷新', exact: true })).toHaveCSS(
@@ -780,4 +789,144 @@ test('长标签建议列表的键盘选中项保持可见', async ({ page }) => 
   await expect(input).toHaveValue('tag-30')
   await expect(popup).not.toBeVisible()
   await page.evaluate(() => (window as unknown as { testClient: WebSocket }).testClient.close())
+})
+
+test('唯一 beta 历史置顶编辑、选择旧来源、多规则共享与删除后重新复制', async ({ page }) => {
+  await login(page)
+  const name = 'shared-history-beta.json'
+  let s = await save(page.request, name, '{"source":1}')
+  s = await save(page.request, name, '{"global":2}', s)
+  await page.goto(`${url(name)}?tab=rules`)
+  await page.getByRole('button', { name: '新增规则', exact: true }).click()
+  await page.getByLabel('beta 复制来源', { exact: true }).selectOption('1')
+  await page.getByLabel('规则名称', { exact: true }).fill('范围 A')
+  await page.getByLabel('条件 1 标签名称', { exact: true }).fill('env')
+  await page.getByLabel('条件 1 标签值 1', { exact: true }).fill('a')
+  await page.getByRole('button', { name: '查看影响并确认' }).click()
+  await expect(page.getByRole('dialog')).toContainText('从主版本 v1 复制')
+  await confirmRule(page)
+  await page.getByRole('button', { name: '新增规则', exact: true }).click()
+  await expect(page.getByLabel('beta 复制来源', { exact: true })).toHaveCount(0)
+  await page.getByLabel('规则名称', { exact: true }).fill('范围 B')
+  await page.getByLabel('条件 1 标签名称', { exact: true }).fill('env')
+  await page.getByLabel('条件 1 标签值 1', { exact: true }).fill('b')
+  await page.getByRole('button', { name: '查看影响并确认' }).click()
+  await confirmRule(page)
+  await page.getByRole('tab', { name: '配置内容' }).click()
+  await expect(page.getByLabel('编辑目标', { exact: true }).locator('option')).toHaveCount(2)
+  await expect(
+    page.getByLabel('编辑目标', { exact: true }).locator('option[value=beta]'),
+  ).toHaveText('beta 配置')
+  await page.getByRole('tab', { name: '版本历史' }).click()
+  const first = page.locator('tbody tr').first()
+  await expect(first).toContainText('beta')
+  await expect(first.getByRole('button', { name: /回退/ })).toHaveCount(0)
+  await first.getByRole('button', { name: '编辑 beta', exact: true }).click()
+  await expect(page.getByLabel('编辑目标', { exact: true })).toHaveValue('beta')
+  await expect(page.getByRole('textbox', { name: '配置内容', exact: true })).toHaveText(
+    '{"source":1}',
+  )
+  await edit(page, '{"shared":true}')
+  await page.getByRole('button', { name: '保存并发布' }).click()
+  await expect(page.getByRole('dialog')).toContainText('所有命中灰度规则的客户端')
+  await expect(page.getByLabel('对比版本', { exact: true })).toHaveCount(0)
+  await confirm(page)
+  s = await state(page.request, name)
+  expect(s.last_version).toBe(2)
+  expect(s.beta.content).toBe('{"shared":true}')
+  expect(s.rules).toHaveLength(2)
+  for (const env of ['a', 'b']) {
+    const response = await page.request.get(
+      `/api/client/config?name=${name}&tags=${encodeURIComponent(JSON.stringify({ env }))}`,
+    )
+    expect(await response.json()).toMatchObject({
+      beta: true,
+      version: 0,
+      content: '{"shared":true}',
+    })
+  }
+  await page.getByRole('tab', { name: '版本历史' }).click()
+  await expect(page.locator('tbody tr')).toHaveCount(3)
+  expect(
+    (await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze()).violations,
+  ).toEqual([])
+  await page.screenshot({
+    path: '../docs/images/frontend/shared-beta-history-light.png',
+    fullPage: true,
+  })
+  await page.getByRole('tab', { name: '灰度规则' }).click()
+  await page.getByRole('button', { name: '删除规则 范围 A', exact: true }).click()
+  await confirmRule(page)
+  expect((await state(page.request, name)).beta.content).toBe('{"shared":true}')
+  await page.getByRole('button', { name: '删除规则 范围 B', exact: true }).click()
+  await confirmRule(page)
+  expect((await state(page.request, name)).beta).toBeUndefined()
+  await page.getByRole('button', { name: '新增规则', exact: true }).click()
+  await expect(page.getByLabel('beta 复制来源', { exact: true })).toBeVisible()
+  await page.getByLabel('beta 复制来源', { exact: true }).selectOption('2')
+  await page.getByLabel('条件 1 标签名称', { exact: true }).fill('env')
+  await page.getByLabel('条件 1 标签值 1', { exact: true }).fill('a')
+  await page.getByRole('button', { name: '查看影响并确认' }).click()
+  await confirmRule(page)
+  expect((await state(page.request, name)).beta.content).toBe('{"global":2}')
+})
+
+test('规则冲突时 beta 被删除需重选来源并保留草稿，元数据操作终止', async ({ page }) => {
+  await login(page)
+  const name = 'beta-removed-rule-conflict.json'
+  let s = await save(page.request, name, '{"source":1}')
+  const firstRule = {
+    id: 'first',
+    name: '原规则',
+    enabled: true,
+    conditions: [{ tag: 'env', operator: 'eq', values: ['first'] }],
+  }
+  let response = await page.request.put(`${path(name)}/rules`, {
+    headers: { Origin: origin },
+    data: {
+      expected_id: s.id,
+      expected_revision: s.revision,
+      confirmed: true,
+      source_version: 1,
+      rules: [firstRule],
+    },
+  })
+  expect(response.ok()).toBeTruthy()
+  await page.goto(`${url(name)}?tab=rules`)
+  await page.getByRole('button', { name: '新增规则', exact: true }).click()
+  await page.getByLabel('规则名称', { exact: true }).fill('保留的草稿')
+  await page.getByLabel('条件 1 标签名称', { exact: true }).fill('env')
+  await page.getByLabel('条件 1 标签值 1', { exact: true }).fill('draft')
+  await page.getByRole('button', { name: '查看影响并确认' }).click()
+  const removeAll = async () => {
+    s = await state(page.request, name)
+    response = await page.request.put(`${path(name)}/rules`, {
+      headers: { Origin: origin },
+      data: { expected_id: s.id, expected_revision: s.revision, confirmed: true, rules: [] },
+    })
+    expect(response.ok()).toBeTruthy()
+  }
+  const triggerConflict = async () => {
+    await page.getByRole('checkbox').check()
+    await page.getByRole('button', { name: '确认生效', exact: true }).click()
+    await expect(page.getByRole('alert')).toContainText('被其他人修改')
+    await page.getByRole('button', { name: '读取最新规则并保留当前编辑' }).click()
+  }
+  await removeAll()
+  await triggerConflict()
+  await expect(page.getByLabel('规则名称', { exact: true })).toHaveValue('保留的草稿')
+  await expect(page.getByLabel('beta 复制来源', { exact: true })).toHaveValue('0')
+  await page.getByLabel('beta 复制来源', { exact: true }).selectOption('1')
+  await page.getByRole('button', { name: '查看影响并确认' }).click()
+  await confirmRule(page)
+  s = await state(page.request, name)
+  expect(s.beta.content).toBe('{"source":1}')
+  expect(s.rules).toHaveLength(1)
+  expect(s.rules[0].name).toBe('保留的草稿')
+  await page.getByRole('button', { name: '停用规则 保留的草稿', exact: true }).click()
+  await removeAll()
+  await triggerConflict()
+  await expect(page.getByRole('dialog')).not.toBeVisible()
+  await expect(page.getByRole('alert')).toContainText('原规则操作无法继续')
+  expect((await state(page.request, name)).beta).toBeUndefined()
 })

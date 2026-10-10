@@ -17,7 +17,7 @@ import { useToast, usePending } from './providers'
 export type ChangeAction =
   | { kind: 'save'; draft: Draft }
   | { kind: 'rollback'; source: Version }
-  | { kind: 'promote'; source: EditorTarget; ruleId: string }
+  | { kind: 'promote'; source: EditorTarget }
 export function ChangeDialog({
   configKey,
   baseline,
@@ -37,14 +37,8 @@ export function ChangeDialog({
   const toast = useToast()
   const [current, setCurrent] = useState(baseline)
   const originalID = useRef(baseline?.id)
-  const ruleId =
-    action.kind === 'save'
-      ? action.draft.ruleId
-      : action.kind === 'promote'
-        ? action.ruleId
-        : undefined
-  const graySave = action.kind === 'save' && !!ruleId
-  const currentTarget = current ? targetVersion(current, graySave ? ruleId : undefined) : undefined
+  const graySave = action.kind === 'save' && action.draft.target === 'beta'
+  const currentTarget = current ? targetVersion(current, graySave ? 'beta' : undefined) : undefined
   const [comparison, setComparison] = useState(currentTarget?.number ?? 0)
   const [checked, setChecked] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -70,7 +64,7 @@ export function ChangeDialog({
       ? { content: '', format: action.kind === 'save' ? action.draft.format : action.source.format }
       : (known ?? other.data)
   const promotionSource =
-    action.kind === 'promote' && current ? targetVersion(current, action.ruleId) : undefined
+    action.kind === 'promote' && current ? targetVersion(current, 'beta') : undefined
   const after = action.kind === 'save' ? action.draft : (promotionSource ?? action.source)
   const noChange =
     !!currentTarget &&
@@ -84,7 +78,7 @@ export function ChangeDialog({
   }, [comparison])
   const title =
     action.kind === 'save'
-      ? ruleId
+      ? graySave
         ? '确认灰度发布'
         : '确认保存并发布'
       : action.kind === 'rollback'
@@ -106,7 +100,7 @@ export function ChangeDialog({
           ? await api.save(configKey, editPayload(current, action.draft))
           : action.kind === 'rollback'
             ? await api.rollback(configKey, baselineOf(current), action.source.number)
-            : await api.promote(configKey, baselineOf(current), action.ruleId)
+            : await api.promote(configKey, baselineOf(current))
       client.setQueryData(configQueryKey(configKey), result.state)
       await Promise.all([
         client.invalidateQueries({ queryKey: ['configs'] }),
@@ -116,7 +110,7 @@ export function ChangeDialog({
       toast(
         result.changed
           ? graySave
-            ? `已更新 v${currentTarget!.number}-beta`
+            ? 'beta 配置已更新并生效'
             : `已发布 v${result.state.last_version}`
           : '内容未变化。',
       )
@@ -139,13 +133,13 @@ export function ChangeDialog({
         setError('原配置已被删除后重建。为避免覆盖新配置，请保留草稿并重新打开。')
         return
       }
-      if (ruleId && !latest.rules.some((r) => r.id === ruleId)) {
+      if ((graySave || action.kind === 'promote') && !latest.beta) {
         setBlocked(true)
-        setError('编辑的灰度规则已被删除。草稿已保留，请返回编辑区复制内容或选择其他目标。')
+        setError('beta 配置已被删除。草稿已保留，请返回编辑区复制内容或选择其他目标。')
         return
       }
       setCurrent(latest)
-      setComparison(targetVersion(latest, graySave ? ruleId : undefined).number)
+      setComparison(targetVersion(latest, graySave ? 'beta' : undefined).number)
       setDiffReady(false)
       onRebase?.(latest)
       client.setQueryData(configQueryKey(configKey), latest)
@@ -189,19 +183,16 @@ export function ChangeDialog({
           <span className="mono">{configKey.name}</span>
           {action.kind !== 'save' && (
             <Badge>
-              来源 v{(promotionSource ?? action.source).number}
-              {action.kind === 'promote' ? '-beta' : ''}
+              {action.kind === 'promote' ? '来源 beta 配置' : `来源 v${action.source.number}`}
             </Badge>
           )}
           <ArrowRight size={14} aria-hidden="true" />
           <strong>
-            {graySave
-              ? `更新临时版本 v${currentTarget?.number}-beta`
-              : `新版本 v${(current?.last_version ?? 0) + 1}`}
+            {graySave ? '更新 beta 配置（无编号）' : `新版本 v${(current?.last_version ?? 0) + 1}`}
           </strong>
         </div>
-        {(ruleId || !!current?.rules.length) && (
-          <p>{publicationImpact(current, graySave ? ruleId : undefined)}</p>
+        {(graySave || !!current?.rules.length) && (
+          <p>{publicationImpact(current, graySave ? 'beta' : undefined)}</p>
         )}
       </div>
       <ErrorNotice error={error} />
@@ -217,7 +208,7 @@ export function ChangeDialog({
       {noChange && <div className="notice info">内容与当前编辑目标一致，无需发布。</div>}
       {graySave ? (
         <p className="section-help">
-          比较当前灰度内容与本次编辑；发布后覆盖临时内容，不保留修改历史。
+          比较当前灰度内容与本次编辑；发布后覆盖唯一 beta 配置，不保留修改历史。
         </p>
       ) : (
         <>

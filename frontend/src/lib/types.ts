@@ -16,7 +16,6 @@ export type GrayRule = {
   id: string
   name: string
   enabled: boolean
-  beta: { base_version: number; content: string; format: Format; description: string }
   conditions: Condition[]
 }
 export type ConfigState = {
@@ -26,6 +25,7 @@ export type ConfigState = {
   last_version: number
   global_version: number
   sequence: number
+  beta?: { content: string; format: Format; description: string; updated_at: string }
   rules: GrayRule[]
   versions: Record<number, Version>
 }
@@ -39,7 +39,7 @@ export type Edit = Baseline & {
   content: string
   format: Format
   description: string
-  rule_id?: string
+  target?: 'global' | 'beta'
   confirmed: true
 }
 export type Mutation = { state: ConfigState; changed: boolean; sequence: number }
@@ -52,9 +52,15 @@ export type Effective = {
   content: string
   format: Format
   rule_id?: string
+  beta: boolean
   deleted: boolean
 }
-export type Draft = { content: string; format: Format; description: string; ruleId?: string }
+export type Draft = {
+  content: string
+  format: Format
+  description: string
+  target?: 'global' | 'beta'
+}
 
 export type ClientSubscription = {
   key: ConfigKey
@@ -62,6 +68,7 @@ export type ClientSubscription = {
   version: number
   revision: number
   rule_id?: string
+  beta: boolean
   deleted: boolean
   sent: boolean
 }

@@ -6,20 +6,14 @@ export function nameError(value: string): string | undefined {
     return '请输入 1–128 字节的名称，不含斜杠或首尾空白。'
 }
 export type EditorTarget = Pick<Version, 'number' | 'content' | 'format' | 'description'>
-export function targetVersion(state: ConfigState, ruleId?: string): EditorTarget {
-  if (ruleId) {
-    const rule = state.rules.find((rule) => rule.id === ruleId)
-    if (!rule) throw new Error('编辑目标已不存在，请保留草稿并重新打开配置。')
-    return {
-      number: rule.beta.base_version,
-      content: rule.beta.content,
-      format: rule.beta.format,
-      description: rule.beta.description,
-    }
+export function targetVersion(state: ConfigState, target?: 'global' | 'beta'): EditorTarget {
+  if (target === 'beta') {
+    if (!state.beta) throw new Error('beta 配置已不存在，请保留草稿并重新打开配置。')
+    return { ...state.beta, number: 0 }
   }
-  const target = state.versions[state.global_version]
-  if (!target) throw new Error('编辑目标已不存在，请保留草稿并重新打开配置。')
-  return target
+  const version = state.versions[state.global_version]
+  if (!version) throw new Error('编辑目标已不存在，请保留草稿并重新打开配置。')
+  return version
 }
 
 export const baselineOf = (state?: ConfigState) => ({
@@ -32,27 +26,26 @@ export function editPayload(state: ConfigState | undefined, draft: Draft): Edit 
     content: draft.content,
     format: draft.format,
     description: draft.description,
-    rule_id: draft.ruleId,
+    target: draft.target,
     confirmed: true,
   }
 }
-export function publicationImpact(state: ConfigState | undefined, ruleId?: string) {
+export function publicationImpact(state: ConfigState | undefined, target?: 'global' | 'beta') {
   if (!state) return '创建第一份配置并全量发布。'
-  if (ruleId) {
-    const rule = state.rules.find((r) => r.id === ruleId)
-    return `仅更新灰度规则「${rule?.name || ruleId}」的临时内容。全量 v${state.global_version} 与其他规则内容保持不变。`
-  }
-  return `全量版本将更新，未命中灰度规则的客户端使用新内容。${state.rules.length ? `${state.rules.length} 条灰度规则继续使用各自临时内容。` : '当前没有灰度规则。'}`
+  if (target === 'beta')
+    return `更新唯一 beta 配置，所有命中灰度规则的客户端立即使用新内容。全量 v${state.global_version} 保持不变，不产生主版本或 beta 历史。`
+  return `全量版本将更新，未命中灰度规则的客户端使用新内容。${state.beta ? 'beta 配置保持不变。' : '当前没有 beta 配置。'}`
 }
-export function draftFrom(state: ConfigState, ruleId?: string): Draft {
-  const version = targetVersion(state, ruleId)
+export function draftFrom(state: ConfigState, target?: 'global' | 'beta'): Draft {
+  const version = targetVersion(state, target)
   return {
     content: version.content,
     format: version.format,
-    description: ruleId ? version.description : '',
-    ruleId,
+    description: target === 'beta' ? version.description : '',
+    target,
   }
 }
+
 export function ruleError(rules: GrayRule[]) {
   if (rules.length > 100) return '最多可维护 100 条灰度规则。'
   const ids = new Set<string>()

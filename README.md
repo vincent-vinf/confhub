@@ -1,6 +1,6 @@
 # ConfHub
 
-轻量配置中心，使用 Go/Gin、React、HTTP GET 与 WebSocket。支持不可变主版本、独立可覆盖的灰度 beta、全量回退、乐观锁、单 admin JWT 登录，以及 PostgreSQL/MySQL 存储。支持 IP 区间灰度、在线客户端只读查看和标签补全。
+轻量配置中心，使用 Go/Gin、React、HTTP GET 与 WebSocket。支持不可变主版本、配置级唯一可覆盖的灰度 beta、全量回退、乐观锁、单 admin JWT 登录，以及 PostgreSQL/MySQL 存储。支持 IP 区间灰度、在线客户端只读查看和标签补全。
 
 需求与架构见 [docs/requirements.md](docs/requirements.md) 和 [docs/architecture.md](docs/architecture.md)，接口见 [docs/backend-api.md](docs/backend-api.md)，控制台交互和验证见 [docs/frontend-implementation.md](docs/frontend-implementation.md)。[Go/Python SDK](docs/sdk.md) 支持获取、订阅、自动重连和可选离线缓存。性能目标尚未压测。
 
@@ -16,7 +16,7 @@ make frontend-install frontend-build build
 ./bin/confhub --static-dir frontend/dist
 ```
 
-当前 schema 3：已使用独立 beta 的 schema 2 部署可运行 `./bin/confhub migrate` 升级，配置不变；无需重建数据库。灰度简化仍不兼容旧 schema 1 数据。旧部署必须停止全部旧实例，将 DSN 指向新的空数据库（或由管理员确认无需保留数据后重建），再初始化新版本；所有实例和 Go/Python SDK 一起升级。服务启动和 migrate 都会拒绝旧 schema，不会自动删除旧数据；不能通过 Force 修改标记绕过。
+当前 schema 4：不兼容旧 schema 1/2/3 数据。旧部署需停止全部旧实例，将 DSN 指向新的空数据库（或由管理员重建）再初始化；所有实例和 Go/Python SDK 一起升级。启动和 migrate 均拒绝旧 schema，不会自动删除旧数据，不能通过 Force 修改标记绕过。
 
 后续支持的数据库升级使用同一二进制：
 
@@ -80,7 +80,7 @@ CONFHUB_DEV_BACKEND=http://127.0.0.1:8081 npm --prefix frontend run dev
 
 浏览器访问 `http://127.0.0.1:5173`。同源认证代理保留浏览器 Host，不开启 `changeOrigin`。登录凭据保存在 HttpOnly Cookie 中；localStorage 只保存主题偏好。
 
-控制台包含配置列表、内容编辑、发布前 diff/确认、主历史查看/比较/全量回退、灰度规则及标签试算、命名空间/分组管理和密码修改。每条规则从当前全量复制独立 beta，名称固定为来源主版本号加 beta，后续直接覆盖；灰度只对比修改前后，不保存历史、不提供回退，关闭保留内容、删除清除内容，转全量生成下一个主版本并保留规则。支持明暗主题、移动导航、JSON/YAML 可撤销格式化，以及七种配置格式高亮。
+控制台包含配置列表、内容编辑、发布前 diff/确认、主历史查看/比较/全量回退、灰度规则及标签试算、在线客户端、命名空间/分组管理和密码修改。每个配置只有一份 beta：第一条规则创建时选择主版本复制，后续规则共享它；历史列表顶部可直接进入 beta 编辑。修改原位覆盖，不保存历史、不提供回退；停用规则保留 beta，删除最后一条规则清除 beta，转全量生成下一个主版本并保留规则。支持明暗主题、移动导航、JSON/YAML 可撤销格式化，以及七种配置格式高亮。
 
 ## 测试
 
@@ -102,6 +102,6 @@ race 检查要求 CGO 和 C 编译器，`make test-race` 会显式启用 CGO；�
 
 `make test` 执行全部测试；未设置测试 DSN 时数据库测试明确 skip。`make test-integration` 和 `make test-race` 要求 DSN 存在，防止误把跳过集成测试当作通过。测试数据库 DSN 使用 PostgreSQL URL 格式。
 
-测试覆盖主版本保存、beta 原位覆盖与隔离、全量回退、并发冲突、删除重建、组织约束、主历史清理不影响 beta、日志清理，以及 HTTP 认证/确认和 WebSocket 跨实例同步、数据库故障和日志缺口补偿。没有压测脚本或负载容器。
+测试覆盖主版本保存、唯一 beta 原位覆盖、多规则共享与来源选择、全量回退、并发冲突、删除重建、组织约束、主历史清理不影响 beta、日志清理，以及 HTTP 认证/确认和 WebSocket 跨实例同步、数据库故障和日志缺口补偿。没有压测脚本或负载容器。
 
 前端端到端测试需要 Docker、Go、Node 和 Chromium，自动构建前端及 Go 服务，使用指定 PostgreSQL 17 镜像创建临时数据库，在 `127.0.0.1:18080` 测试真实 HTTP/数据库流程。数据库使用随机宿主端口，正常退出时删除测试容器；测试报告、截图及失败 trace 保存在被 Git 忽略的 `frontend/playwright-report` 和 `frontend/test-results`。Linux 截图环境需安装中文字体（例如 `fonts-noto-cjk`）。

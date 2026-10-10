@@ -11,7 +11,7 @@ func Resolve(state *State, tags map[string]string) Effective {
 	v := state.Versions[target]
 	ruleID := ""
 	for _, rule := range state.Rules {
-		if !rule.Enabled {
+		if !rule.Enabled || state.Beta == nil {
 			continue
 		}
 		match := true
@@ -37,13 +37,13 @@ func Resolve(state *State, tags map[string]string) Effective {
 			}
 		}
 		if match {
-			target = rule.Beta.BaseVersion
-			v = Version{Content: rule.Beta.Content, Format: rule.Beta.Format}
+			target = 0
+			v = Version{Content: state.Beta.Content, Format: state.Beta.Format}
 			ruleID = rule.ID
 			break
 		}
 	}
-	return Effective{Sequence: state.Sequence, ID: state.ID, Key: state.Key, Revision: state.Revision, Version: target, Content: v.Content, Format: v.Format, RuleID: ruleID}
+	return Effective{Sequence: state.Sequence, ID: state.ID, Key: state.Key, Revision: state.Revision, Version: target, Content: v.Content, Format: v.Format, RuleID: ruleID, Beta: ruleID != ""}
 }
 func ValidateRules(rules []Rule) error {
 	if len(rules) > 100 {

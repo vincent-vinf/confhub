@@ -107,6 +107,7 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
                 await client.get(self.key)
 
     async def test_disk_cache_is_scoped_and_deletion_prevents_resurrection(self):
+        self.value = dict(self.value, beta=True, version=0, rule_id="gray")
         with tempfile.TemporaryDirectory() as directory:
             async with AsyncClient(
                 [self.address], cache_dir=directory, tags={"env": "blue"}
@@ -118,7 +119,8 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
             async with AsyncClient(
                 [self.address], cache_dir=directory, tags={"env": "blue"}
             ) as client:
-                self.assertEqual((await client.get(self.key)).source, "disk")
+                cached = await client.get(self.key)
+                self.assertEqual((cached.source, cached.beta, cached.version), ("disk", True, 0))
                 async with AsyncClient(
                     [self.address], cache_dir=directory, tags={"env": "green"}
                 ) as isolated:
@@ -145,11 +147,11 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(first.version, 3)
             await asyncio.wait_for(self.subscribed.wait(), 2)
             self.value = dict(
-                self.value, sequence=43, revision=8, version=1, content="gray one", rule_id="gray"
+                self.value, sequence=43, revision=8, version=0, beta=True, content="gray one", rule_id="gray"
             )
             await self.messages.put(self.value)
             lower = await asyncio.wait_for(received.get(), 2)
-            self.assertEqual((lower.version, lower.content), (1, "gray one"))
+            self.assertEqual((lower.version, lower.content), (0, "gray one"))
             await self.messages.put(dict(self.value, sequence=42, revision=7, version=3))
             await self.messages.put(None)
             deadline = asyncio.get_running_loop().time() + 3
@@ -163,7 +165,7 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
             )
             await self.messages.put(self.value)
             beta = await asyncio.wait_for(received.get(), 2)
-            self.assertEqual((beta.version, beta.content), (1, "beta replaced"))
+            self.assertEqual((beta.version, beta.content), (0, "beta replaced"))
             deleted = dict(
                 self.value, sequence=45, revision=10, deleted=True, content="", version=0
             )
@@ -171,7 +173,7 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue((await asyncio.wait_for(received.get(), 2)).deleted)
             with self.assertRaises(NotFound):
                 await client.get(self.key)  # stale live HTTP result cannot resurrect deletion
-            rebuilt = dict(self.value, sequence=46, revision=1, id="rebuilt", version=1)
+            rebuilt = dict(self.value, sequence=46, revision=1, id="rebuilt", version=1, beta=False, rule_id="")
             await self.messages.put(rebuilt)
             self.assertEqual((await asyncio.wait_for(received.get(), 2)).id, "rebuilt")
             await client.unsubscribe(self.key)

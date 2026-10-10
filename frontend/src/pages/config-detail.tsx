@@ -53,7 +53,7 @@ function Detail({ configKey }: { configKey: ConfigKey }) {
   const [error, setError] = useState<unknown>()
   const [review, setReview] = useState<Draft>()
   const [deleting, setDeleting] = useState(false)
-  const [pendingTarget, setPendingTarget] = useState<{ ruleId?: string }>()
+  const [pendingTarget, setPendingTarget] = useState<{ target?: 'global' | 'beta' }>()
   const [reset, setReset] = useState(false)
   const editor = useRef<EditorHandle>(null)
   useEffect(() => {
@@ -64,31 +64,31 @@ function Detail({ configKey }: { configKey: ConfigKey }) {
   }, [query.data, query.isFetching, query.error, baseline])
   let target: ReturnType<typeof targetVersion> | undefined
   try {
-    if (baseline && draft) target = targetVersion(baseline, draft.ruleId)
+    if (baseline && draft) target = targetVersion(baseline, draft.target)
   } catch {
-    /* Deleted rules keep the user's draft. */
+    /* A deleted beta keeps the user's draft. */
   }
   const dirty =
     !!draft &&
     (!target ||
       draft.content !== target.content ||
       draft.format !== target.format ||
-      draft.description !== (draft.ruleId ? target?.description : ''))
+      draft.description !== (draft.target === 'beta' ? target?.description : ''))
   useDirty(`配置「${configKey.name}」的未保存编辑`, dirty)
   function applyState(state: ConfigState, preserveDraft = false) {
     client.setQueryData(configQueryKey(configKey), state)
     setBaseline(state)
     if (!preserveDraft || !dirty) {
       try {
-        setDraft(draftFrom(state, draft?.ruleId))
+        setDraft(draftFrom(state, draft?.target))
       } catch {
         setDraft(draftFrom(state))
       }
     }
   }
-  function switchTarget(ruleId?: string) {
+  function switchTarget(target?: 'global' | 'beta') {
     if (!baseline) return
-    setDraft(draftFrom(baseline, ruleId))
+    setDraft(draftFrom(baseline, target))
     setError(undefined)
     setParams({ tab: 'content' })
     setPendingTarget(undefined)
@@ -224,24 +224,19 @@ function Detail({ configKey }: { configKey: ConfigKey }) {
                 编辑目标
                 <select
                   aria-label="编辑目标"
-                  value={draft.ruleId ?? 'global'}
+                  value={draft.target ?? 'global'}
                   onChange={(e) => {
                     const next = {
-                      ruleId: e.target.value === 'global' ? undefined : e.target.value,
+                      target: e.target.value === 'beta' ? ('beta' as const) : undefined,
                     }
                     if (dirty) setPendingTarget(next)
-                    else switchTarget(next.ruleId)
+                    else switchTarget(next.target)
                   }}
                 >
                   <option value="global">全量配置 · v{baseline.global_version}</option>
-                  {baseline.rules.map((rule) => (
-                    <option key={rule.id} value={rule.id}>
-                      {rule.name || rule.id} · v{rule.beta.base_version}-beta
-                      {rule.enabled ? '' : '（停用）'}
-                    </option>
-                  ))}
-                  {draft.ruleId && !target && (
-                    <option value={draft.ruleId}>已删除的灰度规则 · 草稿保留</option>
+                  {baseline.beta && <option value="beta">beta 配置</option>}
+                  {draft.target === 'beta' && !target && (
+                    <option value="beta">已删除的 beta · 草稿保留</option>
                   )}
                 </select>
               </label>
@@ -323,9 +318,9 @@ function Detail({ configKey }: { configKey: ConfigKey }) {
           </div>
           <div className="editor-footer">
             <div className="editor-footer-help">
-              {draft.ruleId
-                ? '保存覆盖此规则的临时内容，不保留修改历史。'
-                : '保存即全量发布，各规则的灰度内容保持不变。'}
+              {draft.target === 'beta'
+                ? '保存覆盖唯一 beta 配置，所有命中的客户端立即生效，不保留修改历史。'
+                : '保存即全量发布，beta 配置保持不变。'}
             </div>
             <div className="button-row">
               <Button
@@ -349,7 +344,7 @@ function Detail({ configKey }: { configKey: ConfigKey }) {
               <Button
                 variant="primary"
                 busy={saving}
-                disabled={!target || draft.content === target.content}
+                disabled={!target || !dirty}
                 onClick={reviewSave}
               >
                 <Save size={16} aria-hidden="true" />
@@ -366,6 +361,7 @@ function Detail({ configKey }: { configKey: ConfigKey }) {
             state={baseline}
             onStateChanged={(state) => applyState(state, true)}
             onRebase={setBaseline}
+            onEditBeta={() => (dirty ? setPendingTarget({ target: 'beta' }) : switchTarget('beta'))}
           />
         </section>
       )}
@@ -375,7 +371,7 @@ function Detail({ configKey }: { configKey: ConfigKey }) {
             configKey={configKey}
             state={baseline}
             onStateChanged={(state) => applyState(state, true)}
-            onEditRule={(ruleId) => (dirty ? setPendingTarget({ ruleId }) : switchTarget(ruleId))}
+            onEditBeta={() => (dirty ? setPendingTarget({ target: 'beta' }) : switchTarget('beta'))}
           />
         </section>
       )}
@@ -421,7 +417,7 @@ function Detail({ configKey }: { configKey: ConfigKey }) {
               variant="danger"
               onClick={() => {
                 switchTarget(
-                  pendingTarget ? pendingTarget.ruleId : target ? draft.ruleId : undefined,
+                  pendingTarget ? pendingTarget.target : target ? draft.target : undefined,
                 )
                 setReset(false)
               }}

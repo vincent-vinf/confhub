@@ -120,7 +120,7 @@ func (s *Session) offer(k config.Key, generation uint64, state *config.State, se
 		value = config.Resolve(state, s.tags)
 	}
 	s.last[k] = value
-	if exists && previous.ID == value.ID && previous.Version == value.Version && previous.Deleted == value.Deleted && previous.RuleID == value.RuleID && previous.Content == value.Content && previous.Format == value.Format {
+	if exists && previous.ID == value.ID && previous.Version == value.Version && previous.Beta == value.Beta && previous.Deleted == value.Deleted && previous.RuleID == value.RuleID && previous.Content == value.Content && previous.Format == value.Format {
 		if _, ok := s.pending[k]; ok {
 			s.pending[k] = value
 		}
@@ -179,7 +179,7 @@ func (s *Session) Sent(v config.Effective) {
 	if _, ok := s.subscriptions[v.Key]; !ok {
 		return
 	}
-	s.delivered[v.Key] = clientinfo.Subscription{Key: v.Key, ID: v.ID, Version: v.Version, Revision: v.Revision, RuleID: v.RuleID, Deleted: v.Deleted, Sent: true}
+	s.delivered[v.Key] = clientinfo.Subscription{Key: v.Key, ID: v.ID, Version: v.Version, Revision: v.Revision, RuleID: v.RuleID, Deleted: v.Deleted, Sent: true, Beta: v.Beta}
 }
 
 // Clients copies only public connection metadata; configuration bodies never leave.

@@ -69,7 +69,7 @@ func TestGlobalPublicationLeavesGrayClientsPinned(t *testing.T) {
 		t.Fatal(err)
 	}
 	rules := []config.Rule{{ID: "canary", Name: "canary", Enabled: true, Conditions: []config.Condition{{Tag: "env", Operator: "eq", Values: []string{"gray"}}}}}
-	m, err = s.SetRules(ctx, k, m.State.ID, m.State.Revision, rules)
+	m, err = s.SetRules(ctx, k, m.State.ID, m.State.Revision, rules, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,14 +81,14 @@ func TestGlobalPublicationLeavesGrayClientsPinned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.Resolve(state, nil).Version != 2 || config.Resolve(state, map[string]string{"env": "gray"}).Version != 1 {
+	if config.Resolve(state, nil).Version != 2 || config.Resolve(state, map[string]string{"env": "gray"}).Version != 0 {
 		t.Fatal("global save changed gray target")
 	}
-	m, err = s.Save(ctx, k, config.Edit{ExpectedID: m.State.ID, ExpectedRevision: m.State.Revision, RuleID: "canary", Content: "three", Format: "text"})
+	m, err = s.Save(ctx, k, config.Edit{ExpectedID: m.State.ID, ExpectedRevision: m.State.Revision, Target: "beta", Content: "three", Format: "text"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.State.GlobalVersion != 2 || config.Resolve(m.State, map[string]string{"env": "gray"}).Version != 1 || config.Resolve(m.State, map[string]string{"env": "gray"}).Content != "three" {
+	if m.State.GlobalVersion != 2 || config.Resolve(m.State, map[string]string{"env": "gray"}).Version != 0 || config.Resolve(m.State, map[string]string{"env": "gray"}).Content != "three" {
 		t.Fatal("gray save changed global target")
 	}
 }
@@ -242,7 +242,7 @@ func TestCleanupDoesNotPinBetaBaseHistoryAndRecordsEventGap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, err = s.SetRules(ctx, k, m.State.ID, m.State.Revision, []config.Rule{{ID: "pinned", Enabled: false, Conditions: []config.Condition{{Tag: "a", Operator: "eq", Values: []string{"b"}}}}})
+	m, err = s.SetRules(ctx, k, m.State.ID, m.State.Revision, []config.Rule{{ID: "pinned", Enabled: false, Conditions: []config.Condition{{Tag: "a", Operator: "eq", Values: []string{"b"}}}}}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,11 +260,11 @@ func TestCleanupDoesNotPinBetaBaseHistoryAndRecordsEventGap(t *testing.T) {
 		t.Fatal("beta base pinned historical main content")
 	}
 	snapshot, err := s.Snapshot(ctx, k)
-	if err != nil || snapshot.Rules[0].Beta.Content != "one" {
+	if err != nil || snapshot.Beta.Content != "one" {
 		t.Fatalf("beta content pruned: %+v %v", snapshot, err)
 	}
 	snapshot.Rules[0].Enabled = true
-	reenabled, err := s.SetRules(ctx, k, snapshot.ID, snapshot.Revision, snapshot.Rules)
+	reenabled, err := s.SetRules(ctx, k, snapshot.ID, snapshot.Revision, snapshot.Rules, 0)
 	if err != nil || config.Resolve(reenabled.State, map[string]string{"a": "b"}).Content != "one" {
 		t.Fatal("disabled beta was not preserved", err)
 	}
@@ -294,7 +294,7 @@ func TestMainRollbackAndBetaPromotionLeaveGrayContentIntact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, err = s.SetRules(ctx, k, m.State.ID, m.State.Revision, []config.Rule{{ID: "canary", Enabled: true, Conditions: []config.Condition{{Tag: "env", Operator: "eq", Values: []string{"gray"}}}}})
+	m, err = s.SetRules(ctx, k, m.State.ID, m.State.Revision, []config.Rule{{ID: "canary", Enabled: true, Conditions: []config.Condition{{Tag: "env", Operator: "eq", Values: []string{"gray"}}}}}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +302,7 @@ func TestMainRollbackAndBetaPromotionLeaveGrayContentIntact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, err = s.Save(ctx, k, config.Edit{ExpectedID: m.State.ID, ExpectedRevision: m.State.Revision, Content: "three", Format: "text", RuleID: "canary"})
+	m, err = s.Save(ctx, k, config.Edit{ExpectedID: m.State.ID, ExpectedRevision: m.State.Revision, Content: "three", Format: "text", Target: "beta"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,17 +313,17 @@ func TestMainRollbackAndBetaPromotionLeaveGrayContentIntact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.State.GlobalVersion != 3 || m.State.Rules[0].Beta.BaseVersion != 1 || m.State.Rules[0].Beta.Content != "three" {
+	if m.State.GlobalVersion != 3 || m.State.Beta.Content != "three" {
 		t.Fatal("main rollback changed beta")
 	}
-	m, err = s.CopyVersion(ctx, k, m.State.ID, m.State.Revision, 0, "canary", false)
+	m, err = s.CopyVersion(ctx, k, m.State.ID, m.State.Revision, 0, "beta", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.State.GlobalVersion != 4 || m.State.Rules[0].Beta.BaseVersion != 1 || m.State.Rules[0].Beta.Content != "three" || m.State.Versions[4].Content != "three" || !m.State.Rules[0].Enabled {
+	if m.State.GlobalVersion != 4 || m.State.Beta.Content != "three" || m.State.Versions[4].Content != "three" || !m.State.Rules[0].Enabled {
 		t.Fatal("promotion changed beta rule")
 	}
-	noop, err := s.CopyVersion(ctx, k, m.State.ID, m.State.Revision, 0, "canary", false)
+	noop, err := s.CopyVersion(ctx, k, m.State.ID, m.State.Revision, 0, "beta", false)
 	if err != nil || noop.Changed || noop.State.LastVersion != 4 {
 		t.Fatal("identical promotion wasn't a no-op", err)
 	}
@@ -347,12 +347,12 @@ func TestGrayEditsOverwriteWithoutConsumingMainVersions(t *testing.T) {
 	m, err = s.SetRules(ctx, k, m.State.ID, m.State.Revision, []config.Rule{
 		{ID: "first", Enabled: true, Conditions: []config.Condition{{Tag: "env", Operator: "eq", Values: []string{"first"}}}},
 		{ID: "second", Enabled: true, Conditions: []config.Condition{{Tag: "env", Operator: "eq", Values: []string{"second"}}}},
-	})
+	}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, content := range []string{"beta-one", "beta-two"} {
-		m, err = s.Save(ctx, k, config.Edit{ExpectedID: m.State.ID, ExpectedRevision: m.State.Revision, RuleID: "first", Content: content, Format: "text"})
+		m, err = s.Save(ctx, k, config.Edit{ExpectedID: m.State.ID, ExpectedRevision: m.State.Revision, Target: "beta", Content: content, Format: "text"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -366,28 +366,31 @@ func TestGrayEditsOverwriteWithoutConsumingMainVersions(t *testing.T) {
 	}
 	first := config.Resolve(state, map[string]string{"env": "first"})
 	second := config.Resolve(state, map[string]string{"env": "second"})
-	if first.Version != 1 || first.Content != "beta-two" || second.Content != "base" || config.Resolve(state, nil).Content != "base" {
+	if first.Version != 0 || first.Content != "beta-two" || second.Content != "beta-two" || config.Resolve(state, nil).Content != "base" {
 		t.Fatalf("beta isolation: %+v %+v", first, second)
 	}
 	metadata := append([]config.Rule(nil), state.Rules...)
 	metadata[0].Name = "renamed"
-	metadata[0].Beta = config.Beta{BaseVersion: 99, Content: "untrusted overwrite", Format: "text"}
-	m, err = s.SetRules(ctx, k, state.ID, state.Revision, metadata)
+	m, err = s.SetRules(ctx, k, state.ID, state.Revision, metadata, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.State.Rules[0].Beta.BaseVersion != 1 || m.State.Rules[0].Beta.Content != "beta-two" {
+	if m.State.Beta.Content != "beta-two" {
 		t.Fatal("metadata edited beta content or origin")
 	}
-	noop, err := s.Save(ctx, k, config.Edit{ExpectedID: m.State.ID, ExpectedRevision: m.State.Revision, RuleID: "first", Content: "beta-two", Format: "text"})
+	noop, err := s.Save(ctx, k, config.Edit{ExpectedID: m.State.ID, ExpectedRevision: m.State.Revision, Target: "beta", Content: "beta-two", Format: "text"})
 	if err != nil || noop.Changed || noop.Sequence != 0 {
 		t.Fatal("identical beta edit published", err)
 	}
-	m, err = s.SetRules(ctx, k, m.State.ID, m.State.Revision, m.State.Rules[1:])
+	m, err = s.SetRules(ctx, k, m.State.ID, m.State.Revision, m.State.Rules[1:], 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.Save(ctx, k, config.Edit{ExpectedID: m.State.ID, ExpectedRevision: m.State.Revision, RuleID: "first", Content: "deleted", Format: "text"}); !errors.Is(err, config.ErrNotFound) {
+	m, err = s.SetRules(ctx, k, m.State.ID, m.State.Revision, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Save(ctx, k, config.Edit{ExpectedID: m.State.ID, ExpectedRevision: m.State.Revision, Target: "beta", Content: "deleted", Format: "text"}); !errors.Is(err, config.ErrNotFound) {
 		t.Fatal("deleted beta could still be edited", err)
 	}
 

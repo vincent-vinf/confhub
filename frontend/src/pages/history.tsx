@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowRight, GitCompareArrows, History, RotateCcw } from 'lucide-react'
 import { api, allVersions } from '../lib/api'
-import { actionNames, formatDate } from '../lib/config'
+import { actionNames, formatDate, targetVersion } from '../lib/config'
 import type { ConfigKey, ConfigState, Version } from '../lib/types'
 import { CodeEditor, ConfigDiff } from '../components/editor'
 import { ChangeDialog, type ChangeAction } from '../components/change-dialog'
@@ -13,11 +13,13 @@ export function HistoryPanel({
   state,
   onStateChanged,
   onRebase,
+  onEditBeta,
 }: {
   configKey: ConfigKey
   state: ConfigState
   onStateChanged: (state: ConfigState) => void
   onRebase: (state: ConfigState) => void
+  onEditBeta: () => void
 }) {
   const versions = useQuery({
     queryKey: ['versions', configKey],
@@ -68,7 +70,7 @@ export function HistoryPanel({
         />
         {versions.isPending ? (
           <Loading label="正在读取版本历史…" />
-        ) : rows?.length ? (
+        ) : rows?.length || state.beta ? (
           <div className="table-scroll">
             <table>
               <thead>
@@ -76,12 +78,51 @@ export function HistoryPanel({
                   <th>版本</th>
                   <th>说明与操作</th>
                   <th>发布引用</th>
-                  <th>创建时间</th>
+                  <th>时间</th>
                   <th>操作</th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((version) => (
+                {state.beta && (
+                  <tr className="beta-history-row">
+                    <td>
+                      <button className="version-link mono" onClick={onEditBeta}>
+                        beta
+                      </button>
+                    </td>
+                    <td>
+                      <div className="history-description">
+                        {state.beta.description || '唯一灰度配置'}
+                      </div>
+                      <small className="muted">可直接修改 · 保存立即生效 · 无修改历史</small>
+                    </td>
+                    <td>
+                      <Badge>灰度</Badge>
+                    </td>
+                    <td className="date-cell">
+                      <time dateTime={state.beta.updated_at}>
+                        {formatDate(state.beta.updated_at)}
+                      </time>
+                    </td>
+                    <td>
+                      <div className="row-actions">
+                        <Button variant="ghost" onClick={onEditBeta}>
+                          编辑 beta
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          onClick={() =>
+                            setAction({ kind: 'promote', source: targetVersion(state, 'beta') })
+                          }
+                        >
+                          转为全量
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+
+                {rows?.map((version) => (
                   <tr key={version.number}>
                     <td>
                       <button
@@ -97,9 +138,8 @@ export function HistoryPanel({
                       </div>
                       <small className="muted">
                         {actionNames[version.action] ?? version.action}
-                        {version.source_version
-                          ? ` · 来源 v${version.source_version}${version.action === 'promote' ? '-beta' : ''}`
-                          : ''}
+                        {version.action === 'promote' ? ' · 来源 beta' : ''}
+                        {version.source_version ? ` · 来源 v${version.source_version}` : ''}
                       </small>
                     </td>
                     <td>
@@ -153,7 +193,7 @@ export function HistoryPanel({
           <Empty title="没有可用历史版本" />
         )}
         <div className="table-footer">
-          <span>按主版本倒序 · 灰度临时内容不进入历史</span>
+          <span>beta 固定置顶 · 主版本倒序 · beta 修改不产生历史</span>
           <div className="pagination">
             <Button disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
               上一页

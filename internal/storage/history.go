@@ -11,7 +11,7 @@ import (
 
 // CopyVersion performs rollback or promotion within the same transaction as
 // the optimistic check and event. Source contents cannot be pruned concurrently.
-func (s *Store) CopyVersion(ctx context.Context, k config.Key, id string, revision, source int64, ruleID string, rollback bool) (config.Mutation, error) {
+func (s *Store) CopyVersion(ctx context.Context, k config.Key, id string, revision, source int64, target string, rollback bool) (config.Mutation, error) {
 	tx, seq, err := s.beginMutation(ctx)
 	if err != nil {
 		return config.Mutation{}, err
@@ -27,7 +27,7 @@ func (s *Store) CopyVersion(ctx context.Context, k config.Key, id string, revisi
 
 	var v config.Version
 	if rollback {
-		if ruleID != "" || source < 1 {
+		if target != "" || source < 1 {
 			return config.Mutation{}, fmt.Errorf("%w: rollback only supports main versions", config.ErrInvalid)
 		}
 		v, err = scanVersion(tx.QueryRowContext(ctx, s.query("SELECT number,content,format,description,action,source_version,created_at FROM config_versions WHERE config_id=? AND number=?"), state.ID, source))
@@ -37,21 +37,13 @@ func (s *Store) CopyVersion(ctx context.Context, k config.Key, id string, revisi
 		v.Action = "rollback"
 		v.Description = fmt.Sprintf("Rollback from version %d", source)
 	} else {
-		if ruleID == "" || source != 0 {
-			return config.Mutation{}, fmt.Errorf("%w: promotion requires a gray rule, not a historical version", config.ErrInvalid)
+		if target != "beta" || source != 0 {
+			return config.Mutation{}, fmt.Errorf("%w: promotion copies beta, not a main version", config.ErrInvalid)
 		}
-		found := false
-		for _, r := range state.Rules {
-			if r.ID == ruleID {
-				v = config.Version{Content: r.Beta.Content, Format: r.Beta.Format, Description: r.Beta.Description, Action: "promote"}
-				source = r.Beta.BaseVersion
-				found = true
-				break
-			}
-		}
-		if !found {
+		if state.Beta == nil {
 			return config.Mutation{}, config.ErrNotFound
 		}
+		v = config.Version{Content: state.Beta.Content, Format: state.Beta.Format, Description: state.Beta.Description, Action: "promote"}
 	}
 	current := state.Versions[state.GlobalVersion]
 	if current.Content == v.Content && current.Format == v.Format {

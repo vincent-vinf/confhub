@@ -3,13 +3,17 @@ package storage
 import (
 	"context"
 	"encoding/json"
-
+	"fmt"
 	"gitlab.bodesitech.com/bodesi/confhub/internal/config"
+	"time"
 )
 
-// SetRules atomically replaces the ordered rule list. A disabled rule still
-// retains its beta content. Only Save can edit beta, never metadata updates.
-func (s *Store) SetRules(ctx context.Context, k config.Key, id string, revision int64, rules []config.Rule) (config.Mutation, error) {
+// SetRules atomically replaces routing metadata. The first rule creates a single
+// beta from the chosen historical main version; later rules share that content.
+func (s *Store) SetRules(ctx context.Context, k config.Key, id string, revision int64, rules []config.Rule, source int64) (config.Mutation, error) {
+	if err := k.Validate(); err != nil {
+		return config.Mutation{}, err
+	}
 	if err := config.ValidateRules(rules); err != nil {
 		return config.Mutation{}, err
 	}
@@ -25,28 +29,30 @@ func (s *Store) SetRules(ctx context.Context, k config.Key, id string, revision 
 	if err = checkEdit(state, id, revision); err != nil {
 		return config.Mutation{}, err
 	}
-
-	// Ignore caller-supplied beta content; copy existing betas or initialize from
-	// the current global content within this transaction.
-	next := make([]config.Rule, len(rules))
-	global := state.Versions[state.GlobalVersion]
-	for i, r := range rules {
-		r.Beta = config.Beta{BaseVersion: global.Number, Content: global.Content, Format: global.Format}
-		for _, existing := range state.Rules {
-			if existing.ID == r.ID {
-				r.Beta = existing.Beta
-				break
-			}
+	if state.Beta == nil && len(rules) > 0 {
+		if source < 1 {
+			return config.Mutation{}, fmt.Errorf("%w: select a main version to initialize beta", config.ErrInvalid)
 		}
-		next[i] = r
+		v, e := scanVersion(tx.QueryRowContext(ctx, s.query("SELECT number,content,format,description,action,source_version,created_at FROM config_versions WHERE config_id=? AND number=?"), state.ID, source))
+		if e != nil {
+			return config.Mutation{}, e
+		}
+		state.Beta = &config.Beta{Content: v.Content, Format: v.Format, Description: v.Description, UpdatedAt: time.Now().UTC()}
+	} else if source != 0 {
+		return config.Mutation{}, fmt.Errorf("%w: source_version is only allowed when creating the first beta", config.ErrInvalid)
 	}
 	before, _ := json.Marshal(state.Rules)
-	after, _ := json.Marshal(next)
+	if rules == nil {
+		rules = []config.Rule{}
+	}
+	after, _ := json.Marshal(rules)
 	if string(before) == string(after) {
 		return config.Mutation{State: state}, nil
 	}
-	rules = next
 	state.Rules = rules
+	if len(rules) == 0 {
+		state.Beta = nil
+	}
 	state.Revision++
 	if err = s.persistTargets(ctx, tx, state); err != nil {
 		return config.Mutation{}, err

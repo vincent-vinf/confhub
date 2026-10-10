@@ -258,6 +258,7 @@ class AsyncClient:
             sub.last.version,
             sub.last.deleted,
             sub.last.rule_id,
+            sub.last.beta,
             sub.last.content,
             sub.last.format,
         ) == (
@@ -265,6 +266,7 @@ class AsyncClient:
             value.version,
             value.deleted,
             value.rule_id,
+            value.beta,
             value.content,
             value.format,
         ):

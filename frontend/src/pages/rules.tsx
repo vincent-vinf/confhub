@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowDown,
   ArrowUp,
@@ -11,30 +11,41 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
-import { api, ApiError, configQueryKey } from '../lib/api'
+import { api, allVersions, ApiError, configQueryKey } from '../lib/api'
 import { baselineOf, ruleError, ruleId, targetVersion } from '../lib/config'
 import type { Condition, ConfigKey, ConfigState, Effective, GrayRule } from '../lib/types'
 import { TagInput } from '../components/tag-input'
 import { ChangeDialog, type ChangeAction } from '../components/change-dialog'
-import { Badge, Button, Confirmation, Empty, ErrorNotice, Loading, Modal } from '../components/ui'
+import { Badge, Button, Confirmation, Empty, ErrorNotice, Modal } from '../components/ui'
 import { useDirty, useToast, usePending } from '../components/providers'
 
 export function RulesPanel({
   configKey,
   state,
   onStateChanged,
-  onEditRule,
+  onEditBeta,
 }: {
   configKey: ConfigKey
   state: ConfigState
   onStateChanged: (state: ConfigState) => void
-  onEditRule: (id: string) => void
+  onEditBeta: () => void
 }) {
   const toast = useToast()
   const client = useQueryClient()
   const [editing, setEditing] = useState<GrayRule>()
   const [initialEdit, setInitialEdit] = useState('')
-  const [pending, setPending] = useState<{ title: string; rules: GrayRule[] }>()
+  const [sourceVersion, setSourceVersion] = useState(0)
+  const [initialSource, setInitialSource] = useState(0)
+  const versions = useQuery({
+    queryKey: ['versions', configKey],
+    queryFn: ({ signal }) => allVersions(configKey, signal),
+    enabled: !!editing && !state.beta,
+  })
+  const [pending, setPending] = useState<{
+    title: string
+    rules: GrayRule[]
+    sourceVersion?: number
+  }>()
   const [checked, setChecked] = useState(false)
   const [error, setError] = useState<unknown>()
   const [busy, setBusy] = useState(false)
@@ -42,7 +53,8 @@ export function RulesPanel({
   usePending('正在更新灰度规则', busy)
   useDirty(
     '灰度规则的未保存编辑',
-    !!pending || (!!editing && JSON.stringify(editing) !== initialEdit),
+    !!pending ||
+      (!!editing && (JSON.stringify(editing) !== initialEdit || sourceVersion !== initialSource)),
   )
   const reviewBaseline = useRef(state)
   const [blocked, setBlocked] = useState(false)
@@ -53,19 +65,15 @@ export function RulesPanel({
           id: ruleId(),
           name: '',
           enabled: true,
-          beta: {
-            base_version: state.global_version,
-            content: '',
-            format: state.versions[state.global_version].format,
-            description: '',
-          },
           conditions: [{ tag: '', operator: 'eq' as const, values: [''] }],
         }
+    setSourceVersion(state.beta ? 0 : state.global_version)
+    setInitialSource(state.beta ? 0 : state.global_version)
     setEditing(value)
     setInitialEdit(JSON.stringify(value))
     setError(undefined)
   }
-  function review(title: string, rules: GrayRule[]) {
+  function review(title: string, rules: GrayRule[], source?: number) {
     const invalid = ruleError(rules)
     if (invalid) {
       setError(invalid)
@@ -73,7 +81,7 @@ export function RulesPanel({
     }
     setBlocked(false)
     reviewBaseline.current = state
-    setPending({ title, rules })
+    setPending({ title, rules, sourceVersion: source })
     setChecked(false)
     setError(undefined)
   }
@@ -83,14 +91,30 @@ export function RulesPanel({
     const next = existing
       ? state.rules.map((rule) => (rule.id === editing.id ? editing : rule))
       : [...state.rules, editing]
-    review(existing ? '确认修改灰度规则' : '确认新增灰度规则', next)
+    if (
+      !state.beta &&
+      (!sourceVersion || !versions.data?.some((v) => v.number === sourceVersion))
+    ) {
+      setError('请选择仍可用的主版本作为 beta 复制来源。')
+      return
+    }
+    review(
+      existing ? '确认修改灰度规则' : '确认新增灰度规则',
+      next,
+      state.beta ? undefined : sourceVersion,
+    )
   }
   async function commit() {
     if (!pending || !checked || busy || blocked) return
     setBusy(true)
     setError(undefined)
     try {
-      const mutation = await api.rules(configKey, baselineOf(reviewBaseline.current), pending.rules)
+      const mutation = await api.rules(
+        configKey,
+        baselineOf(reviewBaseline.current),
+        pending.rules,
+        pending.sourceVersion,
+      )
       onStateChanged(mutation.state)
       client.setQueryData(configQueryKey(configKey), mutation.state)
       await client.invalidateQueries({ queryKey: ['versions', configKey] })
@@ -98,7 +122,13 @@ export function RulesPanel({
       setPending(undefined)
       setEditing(undefined)
     } catch (e) {
-      setError(e)
+      if (e instanceof ApiError && e.status === 404 && pending.sourceVersion && editing) {
+        await client.invalidateQueries({ queryKey: ['versions', configKey] })
+        setPending(undefined)
+        setError('复制来源已不可用，请重新选择仍保留的主版本。')
+      } else {
+        setError(e)
+      }
       setChecked(false)
     } finally {
       setBusy(false)
@@ -113,19 +143,37 @@ export function RulesPanel({
         setError('原配置已删除或重建，请保留当前规则草稿并重新打开配置。')
         return
       }
-      // New rules copy the latest global content; existing rules retain their
-      // current beta even when this metadata draft was opened earlier.
-      const refreshBeta = (rule: GrayRule): GrayRule => ({
-        ...rule,
-        beta: latest.rules.find((r) => r.id === rule.id)?.beta ?? {
-          base_version: latest.global_version,
-          content: '',
-          format: latest.versions[latest.global_version].format,
-          description: '',
-        },
-      })
-      setPending((value) => (value ? { ...value, rules: value.rules.map(refreshBeta) } : value))
-      setEditing((value) => (value ? refreshBeta(value) : value))
+      if (!latest.beta && pending?.rules.length && !pending.sourceVersion) {
+        onStateChanged(latest)
+        reviewBaseline.current = latest
+        setPending(undefined)
+        setChecked(false)
+        if (editing) {
+          setSourceVersion(0)
+          setInitialSource(0)
+          setError('beta 已被删除，规则草稿仍保留。请重新选择主版本作为复制来源。')
+        } else {
+          setError('beta 已被删除，原规则操作无法继续。请重新新增规则并选择主版本复制。')
+        }
+        return
+      }
+      if (!latest.beta && pending?.sourceVersion) {
+        const available = await allVersions(configKey)
+        client.setQueryData(['versions', configKey], available)
+        if (!available.some((version) => version.number === pending.sourceVersion)) {
+          onStateChanged(latest)
+          reviewBaseline.current = latest
+          setPending(undefined)
+          setChecked(false)
+          setError('原复制来源已被清理，草稿仍保留。请重新选择主版本并确认。')
+          return
+        }
+      }
+      // Preserve the explicitly selected source when only the global changes.
+      // If another admin created beta, this list now routes to that shared beta.
+      setPending((value) =>
+        value ? { ...value, sourceVersion: latest.beta ? undefined : value.sourceVersion } : value,
+      )
       onStateChanged(latest)
       reviewBaseline.current = latest
       setChecked(false)
@@ -136,8 +184,8 @@ export function RulesPanel({
       setBusy(false)
     }
   }
-  function promote(rule: GrayRule) {
-    setAction({ kind: 'promote', source: targetVersion(state, rule.id), ruleId: rule.id })
+  function promote() {
+    setAction({ kind: 'promote', source: targetVersion(state, 'beta') })
   }
   function move(index: number, offset: number) {
     const next = [...state.rules]
@@ -154,7 +202,7 @@ export function RulesPanel({
               灰度规则 <Badge>{state.rules.length}</Badge>
             </div>
             <p className="section-help">
-              从上到下匹配，第一条命中生效；未命中使用全量 v{state.global_version}。
+              从上到下匹配，第一条命中使用唯一 beta；未命中使用全量 v{state.global_version}。
             </p>
           </div>
           <Button
@@ -200,18 +248,9 @@ export function RulesPanel({
                     <Badge tone={rule.enabled ? 'success' : 'neutral'}>
                       {rule.enabled ? '启用' : '停用'}
                     </Badge>
-                    <Badge>v{rule.beta.base_version}-beta</Badge>
+                    <Badge>beta</Badge>
                   </div>
                   <RuleConditions rule={rule} />
-                  <div className="rule-content-actions">
-                    <Button variant="ghost" onClick={() => onEditRule(rule.id)}>
-                      <Pencil size={14} aria-hidden="true" />
-                      编辑此规则内容
-                    </Button>
-                    <Button variant="ghost" onClick={() => promote(rule)}>
-                      转为全量
-                    </Button>
-                  </div>
                 </div>
                 <div className="rule-actions">
                   <Button
@@ -257,10 +296,29 @@ export function RulesPanel({
         ) : (
           <Empty
             title="当前使用全量发布"
-            description="添加标签条件后，从当前全量创建独立灰度内容。"
+            description="创建第一条规则时选择主版本复制为 beta；所有命中的规则共享它。"
           />
         )}
       </section>
+      {state.beta && (
+        <section className="panel">
+          <div className="panel-toolbar">
+            <div>
+              <div className="panel-title">
+                <Badge>beta</Badge>唯一灰度配置
+              </div>
+              <p className="section-help">所有启用且命中的规则使用同一份内容；编辑不产生新版本。</p>
+            </div>
+            <div className="button-row">
+              <Button onClick={onEditBeta}>
+                <Pencil size={15} aria-hidden="true" />
+                编辑 beta 配置
+              </Button>
+              <Button onClick={promote}>转为全量</Button>
+            </div>
+          </div>
+        </section>
+      )}
       <Simulation configKey={configKey} state={state} />
       {editing && !pending && (
         <Modal
@@ -278,6 +336,30 @@ export function RulesPanel({
             </>
           }
         >
+          {!state.beta && (
+            <label>
+              beta 复制来源
+              <select
+                aria-label="beta 复制来源"
+                value={sourceVersion}
+                onChange={(event) => setSourceVersion(Number(event.target.value))}
+                disabled={versions.isPending}
+              >
+                <option value={0}>请选择主版本</option>
+                {versions.data?.map((version) => (
+                  <option key={version.number} value={version.number}>
+                    v{version.number}
+                    {version.number === state.global_version ? ' · 当前全量' : ''}
+                    {version.description ? ` · ${version.description}` : ''}
+                  </option>
+                ))}
+              </select>
+              <span className="section-help">
+                仅创建第一条规则时复制一次，beta 保存后与来源版本无关。
+              </span>
+            </label>
+          )}
+          {!state.beta && <ErrorNotice error={versions.error} onRetry={() => versions.refetch()} />}
           <RuleForm rule={editing} onChange={setEditing} />
           <ErrorNotice error={error} />
         </Modal>
@@ -313,8 +395,15 @@ export function RulesPanel({
         >
           <div className="notice info">
             全量仍为 v{state.global_version}
-            。规则停用保留临时内容，删除清除临时内容。停用或移除后继续匹配后面的规则，全部未命中才使用全量。
+            。规则停用保留 beta；仅删除最后一条规则时清除
+            beta。停用或移除后继续匹配后面的规则，全部未命中才使用全量。
           </div>
+          {pending.sourceVersion && (
+            <div className="notice info">
+              从主版本 v{pending.sourceVersion} 复制内容与格式，创建唯一 beta
+              配置。该来源不会随全量变更自动切换。
+            </div>
+          )}
           <div className="rule-comparison">
             <div>
               <h3>原匹配顺序</h3>
@@ -385,7 +474,7 @@ function RuleSummary({ rules }: { rules: GrayRule[] }) {
         <li key={rule.id}>
           <div>
             <strong>{rule.name || '未命名规则'}</strong>
-            <Badge>v{rule.beta.base_version}-beta</Badge>
+            <Badge>beta</Badge>
             <Badge tone={rule.enabled ? 'success' : 'neutral'}>
               {rule.enabled ? '启用' : '停用'}
             </Badge>
@@ -412,13 +501,9 @@ function RuleForm({ rule, onChange }: { rule: GrayRule; onChange: (rule: GrayRul
             onChange={(e) => onChange({ ...rule, name: e.target.value })}
           />
         </label>
-        <div>
-          <span className="muted">灰度临时版本</span>
-          <p className="mono">v{rule.beta.base_version}-beta</p>
-        </div>
       </div>
       <p className="section-help">
-        新规则复制当前全量内容；后续在配置内容页编辑并覆盖，不保留灰度历史。关闭保留内容，删除会清除内容。
+        规则仅指定匹配范围，命中后使用唯一 beta 配置。关闭保留 beta，删除最后一条规则清除 beta。
       </p>
       <label className="check-label">
         <input
@@ -679,8 +764,7 @@ function Simulation({ configKey, state }: { configKey: ConfigKey; state: ConfigS
             <>
               <span className="eyebrow">EFFECTIVE VERSION</span>
               <strong className="simulation-version">
-                v{result.version}
-                {result.rule_id ? '-beta' : ''}
+                {result.beta ? 'beta' : `v${result.version}`}
               </strong>
               <Badge tone={result.rule_id ? 'warning' : 'success'}>
                 {result.rule_id ? '命中灰度规则' : '使用全量配置'}

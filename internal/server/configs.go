@@ -101,7 +101,7 @@ func (s *Server) configRoutes(a *gin.RouterGroup) {
 	})
 	a.PUT(base+"/:name", func(c *gin.Context) {
 		var b confirmedEdit
-		if !bind(c, &b) || !confirm(c, b.Confirmed) {
+		if !bindStrict(c, &b) || !confirm(c, b.Confirmed) {
 			return
 		}
 		m, err := s.store.Save(c.Request.Context(), pathKey(c), b.Edit)
@@ -118,25 +118,13 @@ func (s *Server) configRoutes(a *gin.RouterGroup) {
 	a.PUT(base+"/:name/rules", func(c *gin.Context) {
 		var b struct {
 			confirmedTarget
-			Rules []config.RuleInput `json:"rules"`
+			Rules  []config.Rule `json:"rules"`
+			Source int64         `json:"source_version"`
 		}
-		decoder := json.NewDecoder(c.Request.Body)
-		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&b); err != nil {
-			c.AbortWithStatusJSON(400, gin.H{"error": "rules accept metadata only; edit beta content through configuration save"})
+		if !bindStrict(c, &b) || !confirm(c, b.Confirmed) {
 			return
 		}
-		if !confirm(c, b.Confirmed) {
-			return
-		}
-		if b.Rules == nil {
-			b.Rules = []config.RuleInput{}
-		}
-		rules := make([]config.Rule, len(b.Rules))
-		for i, r := range b.Rules {
-			rules[i] = r.Rule()
-		}
-		m, err := s.store.SetRules(c.Request.Context(), pathKey(c), b.ExpectedID, b.ExpectedRevision, rules)
+		m, err := s.store.SetRules(c.Request.Context(), pathKey(c), b.ExpectedID, b.ExpectedRevision, b.Rules, b.Source)
 		s.mutated(c, "rules", m, err)
 	})
 	a.POST(base+"/:name/simulate", func(c *gin.Context) {
@@ -184,13 +172,16 @@ func (s *Server) configRoutes(a *gin.RouterGroup) {
 		a.POST(base+"/:name/"+action, func(c *gin.Context) {
 			var b struct {
 				confirmedTarget
-				Source int64  `json:"source_version"`
-				RuleID string `json:"rule_id"`
+				Source int64 `json:"source_version"`
 			}
-			if !bind(c, &b) || !confirm(c, b.Confirmed) {
+			if !bindStrict(c, &b) || !confirm(c, b.Confirmed) {
 				return
 			}
-			m, err := s.store.CopyVersion(c.Request.Context(), pathKey(c), b.ExpectedID, b.ExpectedRevision, b.Source, b.RuleID, action == "rollback")
+			target := ""
+			if action == "promote" {
+				target = "beta"
+			}
+			m, err := s.store.CopyVersion(c.Request.Context(), pathKey(c), b.ExpectedID, b.ExpectedRevision, b.Source, target, action == "rollback")
 			s.mutated(c, action, m, err)
 		})
 	}

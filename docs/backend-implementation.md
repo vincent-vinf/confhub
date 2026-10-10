@@ -1,6 +1,6 @@
 # 后端实现与验证
 
-范围依据 [requirements.md](requirements.md)、[architecture.md](architecture.md) 与五份 ADR。本次实现 Go 服务端及必要的单元、集成测试；React 页面、客户端 SDK 和压测留在后续阶段。
+范围依据 [requirements.md](requirements.md)、[architecture.md](architecture.md) 与 docs/adr 下的架构决策。本次实现 Go 服务端及必要的单元、集成测试；React 页面与客户端 SDK 已完成；不执行压测。
 
 ## 已确认的测试边界
 
@@ -17,11 +17,11 @@
 | Gin 后端与 flag/env 启动 | `cmd/main`、`internal/settings`、`internal/server` | Go 构建/vet、三实例 Compose 启动、CLI flag 覆盖 env |
 | Namespace / Group / 配置名与默认组织 | 迁移、组织与配置管理 API | 非空组织删除拒绝、配置读写测试 |
 | 递增不可变版本、描述、原文无变化不发布 | 事务 Save、Version、History | 保存/读取/历史/no-op 测试 |
-| 全量主版本与独立 beta | Save、SetRules、Resolve | 全量保存不影响 beta；灰度原位覆盖、编号不变、无历史 |
+| 全量主版本与配置唯一 beta | Save、SetRules、Resolve | 全量保存不影响 beta；灰度原位覆盖、编号不变、无历史 |
 | 灰度 AND、eq/in、首条命中、排序/停用/删除/试算 | Resolve、完整规则列表替换、simulate API | 首条匹配、缺失标签、停用回落、条件校验测试 |
-| 回退与提升新版本，保留其他目标 | CopyVersion、版本操作/来源记录 | 全量回退保持 beta、灰度回退拒绝、按规则转全量及主历史测试 |
+| 回退与提升新版本，保留其他目标 | CopyVersion、版本操作/来源记录 | 全量回退保持 beta、灰度回退拒绝、唯一 beta 转全量及主历史测试 |
 | 统一乐观锁与删除重建身份隔离 | 配置 UUID 和 revision 校验 | 两编辑者竞争、旧身份请求拒绝、HTTP 409 |
-| 历史数量、引用保护、短期维护租约、日志水位 | Cleanup、维护 worker | 近期主版本保留、beta 来源主历史可清理且 beta 保留、双租约拒绝 |
+| 历史数量、引用保护、短期维护租约、日志水位 | Cleanup、维护 worker | 近期主版本保留、beta 复制来源主历史可清理且 beta 保留、双租约拒绝 |
 | PostgreSQL / MySQL 与 golang-migrate | 两套 SQL、驱动适配器、独立迁移池、migrate 子命令 | PostgreSQL 全部集成；幂等迁移、业务池存活、dirty 拒绝；MySQL 仅静态审查 |
 | admin 首次初始化、纯 JWT、密码修改、Cookie 来源保护 | InitializeAdmin、认证与密码 API | 重启不覆盖密码、新密码登录/旧密码拒绝、旧 JWT 保持有效、非法 JWT 和跨来源请求拒绝 |
 | 客户端匿名 HTTP GET 与完整 WebSocket 推送 | client config/watch API | 未登录读取、创建前缺失、发布、删除、同名重建推送 |
@@ -53,7 +53,7 @@ SDK 负责采集/覆盖 sys.ip、sys.hostname、自定义标签保留名检查�
 
 ## 灰度模型调整（2026-10-10）
 
-见 ADR 0006：schema 2 将每规则 beta 保存为独立可修改正文，来源编号不外键引用主历史；规则元数据 API 不接受正文或目标版本。灰度编辑只更新 beta 和配置修订；回退仅支持主历史，转全量通过 rule_id 读取事务内当前 beta。主历史清理不影响关闭中的 beta。旧 schema 1 不兼容，启动和 migrate 要求使用空数据库重建，不自动删除数据。
+见配置级唯一 beta 规范及 ADR 0007：schema 4 的 config_beta 每配置一份可修改正文；规则仅保存元数据。首次创建规则在事务内从所选主版本复制，随后 beta 编辑只覆盖当前内容和修订；转全量不选择规则，全量回退保持 beta。删除最后一条规则清除 beta，关闭保留。旧 schema 1/2/3 拒绝兼容，使用空数据库重建。
 
 通知及 Go/Python SDK 去重增加规则身份、正文及格式，既保证同名 beta 更新可见，又抑制无关规则、全量及描述变化。测试使用指定 PostgreSQL 镜像和隔离数据库；MySQL 仅维护相应 SQL，未运行真实 MySQL 测试。
 
@@ -61,10 +61,16 @@ SDK 负责采集/覆盖 sys.ip、sys.hostname、自定义标签保留名检查�
 
 新增 `ip_range` 并复用到配置读取、模拟与 WebSocket 路由。`net/netip` 校验完整起止地址、同族及数值顺序，包含端点；IPv4 映射 IPv6 统一处理，zone 不接受。
 
-presence worker 和配置同步 worker 独立运行。成功升级后记录临时连接身份，成功发送后更新无正文的订阅信息。共享数据库 lease、fingerprint 和标签索引支持多实例只读查询；只有变化客户端写入，插入/删除使用有大小上限的批次。过期查询过滤与后台物理清理分开，不参与配置 change stream 或 mutation 锁。schema 2 显式迁移至 3 保留配置；schema 1 拒绝兼容。
+presence worker 和配置同步 worker 独立运行。成功升级后记录临时连接身份，成功发送后更新无正文的订阅信息。共享数据库 lease、fingerprint 和标签索引支持多实例只读查询；只有变化客户端写入，插入/删除使用有大小上限的批次。过期查询过滤与后台物理清理分开，不参与配置 change stream 或 mutation 锁。当前 schema 4 包含连接表；旧 schema 1/2/3 均拒绝兼容。
 
-验证覆盖真实 PostgreSQL 的事务、lease 过期、断连删除、去重/字面前缀/大小写/空格、建议上限及内置名称保留、schema 2 升级；HTTP/WebSocket 覆盖管理员权限、跨实例显示、版本更新、取消订阅及断连。指定 PostgreSQL 17 镜像用于所有数据库验证。MySQL 只提供迁移和适配器，按已确认边界不运行 MySQL 集成测试。
+验证覆盖真实 PostgreSQL 的事务、lease 过期、断连删除、去重/字面前缀/大小写/空格、建议上限及内置名称保留、旧 schema 拒绝；HTTP/WebSocket 覆盖管理员权限、跨实例显示、版本更新、取消订阅及断连。指定 PostgreSQL 17 镜像用于所有数据库验证。MySQL 只提供迁移和适配器，按已确认边界不运行 MySQL 集成测试。
 
 审查补充：PostgreSQL 标签索引使用 BYTEA、MySQL 使用 VARBINARY，以保留合法 JSON 标签中的 NUL、大小写与空格；prefix 以二进制 LIKE 的字面转义查询，JSON 快照用 utf8mb4 存储。真实 PostgreSQL 回归验证特殊标签与普通连接可同时展示并查询，不能使实例续租失败。
 
 此次全量回归：`python3 sdk/test-integration.py --full` 通过（Go/Python 双实例 SDK、服务端 PostgreSQL race 与 vet）；审查修正后 presence/suggestions/迁移与跨实例客户端接口的针对性 race 回归通过。未执行压测。
+
+## 配置级唯一 beta 验证（2026-10-10）
+
+`python3 sdk/test-integration.py --full` 通过：真实 PostgreSQL 的完整后端 race/vet、Go SDK 与 Python 10 条测试、双实例同名 beta 更新和离线缓存。前端 25 个单测及全部 18 条 Playwright 流程通过，包含置顶编辑、旧主版本复制、多规则共享、删除最后规则后重新复制，以及已有冲突、回退、IP 区间和在线客户端行为。TypeScript、Prettier、mypy、ruff、SDK vet 与 diff 检查通过。MySQL 未运行真实数据库测试，不执行压测。
+
+审查发现规则冲突恢复时 beta 可能已被其他管理员删除。新增浏览器回归先复现失败，再修正为保留编辑草稿并重选来源；元数据操作明确终止。该回归及两个受影响流程通过（共验证 19 条不同浏览器流程），修正后 TypeScript 通过。

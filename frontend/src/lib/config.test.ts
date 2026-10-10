@@ -13,7 +13,6 @@ export const rule: GrayRule = {
   id: 'gray',
   name: '预发布',
   enabled: true,
-  beta: { base_version: 1, content: '{"v":1}', format: 'json', description: '' },
   conditions: [{ tag: 'env', operator: 'eq', values: ['gray'] }],
 }
 export const state: ConfigState = {
@@ -24,6 +23,7 @@ export const state: ConfigState = {
   global_version: 2,
   sequence: 9,
   rules: [rule],
+  beta: { content: '{"v":1}', format: 'json', description: '', updated_at: '2026-10-10T00:00:00Z' },
   versions: {
     1: {
       number: 1,
@@ -50,45 +50,42 @@ describe('发布边界', () => {
       content: '{"v":2}',
       format: 'json',
       description: '',
-      ruleId: undefined,
+      target: undefined,
     })
-    expect(draftFrom(state, 'gray').content).toBe('{"v":1}')
-    expect(() => draftFrom(state, 'removed')).toThrow('编辑目标')
+    expect(draftFrom(state, 'beta').content).toBe('{"v":1}')
+    expect(() => draftFrom({ ...state, beta: undefined }, 'beta')).toThrow('beta 配置')
   })
-  it('灰度直接读取规则正文，不依赖主历史，重新编辑保留灰度说明', () => {
+  it('beta 直接读取唯一正文，不依赖主历史，重新编辑保留灰度说明', () => {
     const edited = structuredClone(state)
-    edited.rules[0] = {
-      ...edited.rules[0],
-      beta: {
-        base_version: 1,
-        content: '{"beta":"updated"}',
-        format: 'json',
-        description: '灰度说明',
-      },
-    }
-    delete edited.versions[1]
-    expect(draftFrom(edited, 'gray')).toEqual({
+    edited.beta = {
       content: '{"beta":"updated"}',
       format: 'json',
       description: '灰度说明',
-      ruleId: 'gray',
+      updated_at: '2026-10-10T00:00:00Z',
+    }
+    delete edited.versions[1]
+    expect(draftFrom(edited, 'beta')).toEqual({
+      content: '{"beta":"updated"}',
+      format: 'json',
+      description: '灰度说明',
+      target: 'beta',
     })
   })
   it('乐观锁携带配置身份与修订，而非比较版本', () => {
-    expect(editPayload(state, { ...draftFrom(state, 'gray'), content: 'new' })).toEqual({
+    expect(editPayload(state, { ...draftFrom(state, 'beta'), content: 'new' })).toEqual({
       expected_id: 'original',
       expected_revision: 7,
       content: 'new',
       format: 'json',
       description: '',
-      rule_id: 'gray',
+      target: 'beta',
       confirmed: true,
     })
     expect(baselineOf()).toEqual({ expected_id: '', expected_revision: 0 })
   })
   it('发布影响明确说明固定灰度和全量边界', () => {
-    expect(publicationImpact(state)).toContain('1 条灰度规则继续使用各自临时内容')
-    expect(publicationImpact(state, 'gray')).toContain('全量 v2')
+    expect(publicationImpact(state)).toContain('beta 配置保持不变')
+    expect(publicationImpact(state, 'beta')).toContain('全量 v2')
   })
 })
 describe('输入约束', () => {

@@ -33,18 +33,18 @@
   "content": "port: 8080\n",
   "format": "yaml",
   "description": "可选说明",
-  "rule_id": "可选；指定时只覆盖对应规则的 beta 内容",
+  "target": "beta",
   "confirmed": true
 }
 ```
 
-首次创建修订号为 0。后续保存必须携带 GET 返回的 `id` 与 `revision`。全量和灰度共享配置修订号，任一并发变更都会要求重新比较、确认。全量编辑切换主历史 diff 对象不能替换这两个字段；灰度仅提供当前内容与编辑内容的 diff。
+target 省略或为 `global` 时全量保存，`beta` 时覆盖唯一 beta；不接受旧 `rule_id` 字段。首次创建修订号为 0。后续保存必须携带 GET 返回的 `id` 与 `revision`。全量和灰度共享配置修订号，任一并发变更都会要求重新比较、确认。全量编辑切换主历史 diff 对象不能替换这两个字段；灰度仅提供当前内容与编辑内容的 diff。
 
 保存、规则修改、回退、提升和删除要求 `confirmed:true`；这是提交协议，正文 diff 由前端展示。创建命名空间/分组无需正文 diff。删除组织同样要求确认。
 
 保存返回 `{"state":{…},"changed":true,"sequence":42}`。全量正文和格式均相同返回 `changed:false`、`sequence:0`，不创建版本或事件，也不修改主版本描述；仅改格式可以发布新主版本。灰度正文、格式或描述有变化则原位覆盖 beta、递增修订并写入变更事件；不新增主版本或灰度历史，仅改描述不推送客户端。
 
-`GET CONFIG` 返回身份、修订、全量版本、版本计数、规则列表和当前全量正文与各规则独立的 beta 正文。`versions` 只包含当前全量主版本，按编号索引；主版本正文不可修改。beta 保存在 `rules[].beta`，可覆盖且不引用 `versions`。
+`GET CONFIG` 返回身份、修订、全量版本、版本计数、规则列表和当前全量正文与配置级唯一 beta 正文。`versions` 只包含当前全量主版本，按编号索引；主版本正文不可修改。beta 保存在 `state.beta`，可覆盖且不引用 `versions`。
 
 声明格式支持 `text/json/yaml/toml/xml/properties/ini`。发布前服务器校验语法，不展开应用占位符或转换正文。名称为 1–128 字节，不能包含斜杠或首尾空白。
 
@@ -55,8 +55,8 @@
 | GET | `CONFIG/versions` | `before` 为排他版本游标，`limit` 默认 100，最大 100；仅返回主历史元数据及当前全量标识 |
 | GET | `CONFIG/versions/:version` | 返回包含正文的单份历史版本 |
 | POST | `CONFIG/rollback` | `expected_id/expected_revision/source_version/confirmed`，仅全量，禁止 `rule_id` |
-| POST | `CONFIG/promote` | `expected_id/expected_revision/rule_id/confirmed`，读取该规则当前 beta 发布为全量，禁止 `source_version` |
-| PUT | `CONFIG/rules` | `expected_id/expected_revision/confirmed/rules`，原子替换整个有序列表 |
+| POST | `CONFIG/promote` | `expected_id/expected_revision/confirmed`，读取唯一 beta 发布为全量，禁止 `rule_id` 和非零 `source_version` |
+| PUT | `CONFIG/rules` | `expected_id/expected_revision/confirmed/rules/source_version`，原子替换整个有序列表；source_version 仅首次创建 beta 必填 |
 | POST | `CONFIG/simulate` | `{"tags":{"env":"gray"}}`，返回命中规则与有效配置 |
 
 规则列表更新的输入结构（仅元数据，不接受 `target_version` 或 `beta`）：
@@ -70,22 +70,22 @@
 }
 ```
 
-列表先后顺序就是匹配顺序；规则内部使用 AND。`eq` 只接受一个值，`in` 接受值集合，`ip_range` 接受两个有序的完整 IP 地址；缺失标签不匹配。规则最多 100 条，每条最多 32 个条件。停用规则保留其临时内容，重新开启继续使用。新增、排序、停用和删除都通过替换列表完成。删除一条规则后继续匹配后面的规则。
+列表先后顺序就是匹配顺序；规则内部使用 AND。`eq` 只接受一个值，`in` 接受值集合，`ip_range` 接受两个有序的完整 IP 地址；缺失标签不匹配。规则最多 100 条，每条最多 32 个条件。停用规则保留共享 beta，重新开启继续使用。新增、排序、停用和删除都通过替换列表完成。删除一条规则后继续匹配后面的规则。
 
-创建规则时服务端在事务内复制当前全量正文及格式，设置不可更改的 `base_version`。读取规则时额外返回：
+首次创建规则时提交顶层 `source_version`（正整数），服务端在同一事务内复制该保留主版本的正文及格式。缺少来源返回 400，不存在返回 404；已有 beta 时不得提交非零来源。规则仅有元数据，配置读取额外返回顶层：
 
 ```json
 "beta": {
-  "base_version": 4,
   "content": "port: 8081\n",
   "format": "yaml",
-  "description": "灰度说明"
+  "description": "灰度说明",
+  "updated_at": "2026-10-10T12:00:00Z"
 }
 ```
 
-名称显示为 V4-beta；主全量后续更新和 beta 覆盖均不改变该名称。不同规则内容独立，删除规则清除 beta；beta 不占主历史配额，清理来源主历史不影响 beta。
+名称固定 beta，无创建来源编号。所有规则共享它，删除最后一条规则清除 beta；后续新增重新选择复制来源。beta 不占主历史配额，清理来源主历史不影响内容。
 
-回退仅复制主历史正文生成下一个主版本，自动描述来源。灰度转全量通过 `rule_id` 读取当前 beta，生成下一个主版本，保留规则和 beta；全量编辑不改变任何 beta。转全量主版本的 `source_version` 记录 beta 的创建来源编号，应显示为 Vn-beta，而非宣称内容来自对应主历史快照。正文与格式均相同时不产生重复主版本。
+回退仅复制主历史正文生成下一个主版本，自动描述来源。灰度转全量读取唯一 beta，生成下一个主版本，保留规则和 beta；全量编辑不改变 beta。转全量主版本的 action 为 promote、source_version 内部为 0（JSON 可省略），界面来源显示 beta。正文与格式均相同时不产生重复主版本。
 
 ## 客户端读取
 
@@ -101,7 +101,8 @@
   "id": "配置实例 UUID",
   "key": {"namespace":"public","group":"DEFAULT_GROUP","name":"service"},
   "revision": 7,
-  "version": 3,
+  "version": 0,
+  "beta": true,
   "content": "port: 8080\n",
   "format": "yaml",
   "rule_id": "命中时返回",
@@ -109,7 +110,7 @@
 }
 ```
 
-不存在时 HTTP 404 返回 `deleted:true`、业务键与读取水位。身份和流序号用于抵御晚到结果；命中灰度时 `version` 是 beta 创建来源的主版本号，`rule_id` 非空，可显示为 V{version}-beta；它不是 beta 修改计数。同名 beta 原位修改时 version 不变，灰度切换时编号也可能下降；同名配置重建从版本 1 开始。HTTP/推送可在正常传播窗口内暂时读取旧缓存。
+不存在时 HTTP 404 返回 `deleted:true`、业务键与读取水位。身份和流序号抵御晚到结果；灰度使用 `beta:true/version:0`、非空 rule_id，全量使用 `beta:false/version:N`（N 为正整数）。同名 beta 原位编辑仍根据正文、格式等变化通知；同名配置重建从主版本 1 开始。HTTP/推送可在正常传播窗口内暂时读取旧缓存。
 
 ## WebSocket
 
@@ -119,7 +120,7 @@
 {"op":"subscribe","key":{"namespace":"public","group":"DEFAULT_GROUP","name":"service"}}
 ```
 
-注册订阅后立即推送当前有效状态；不存在也明确推送删除状态。消息直接使用上述有效状态结构，没有额外 envelope。后续配置身份、有效版本、命中规则、正文、格式或存在状态改变时推送完整正文；配置级修订变化但有效内容未受影响时不推送。连续变更允许合并为最终状态，每个配置最多保留一个待发送快照。
+注册订阅后立即推送当前有效状态；不存在也明确推送删除状态。消息直接使用上述有效状态结构，没有额外 envelope。后续配置身份、有效版本、beta 标识、命中规则、正文、格式或存在状态改变时推送完整正文；配置级修订变化但有效内容未受影响时不推送。连续变更允许合并为最终状态，每个配置最多保留一个待发送快照。
 
 ```json
 {"op":"unsubscribe","key":{"namespace":"public","group":"DEFAULT_GROUP","name":"service"}}
@@ -139,12 +140,12 @@
 
 ## 数据库模型边界
 
-当前 schema 3 可以显式迁移 schema 2；不兼容旧 schema 1 配置数据。启动和 migrate 拒绝旧 schema，要求使用新的空数据库或由使用者重建。旧数据不会由应用自动删除或转换。
+当前 schema 4 仅支持空数据库初始化，不兼容 schema 1/2/3。启动和 migrate 均拒绝旧 schema，要求使用新的空数据库或由使用者重建，不自动删除或转换旧数据。
 
 ## 在线客户端（只读管理接口）
 
 - `GET /api/admin/clients?after=<连接ID>&limit=25`：要求 admin 登录，返回 `{clients:[],next_after?:string}`。按连接 ID 游标分页，limit 1–100。连接 ID 每次重连重新生成，不代表机器身份。
-- 每个客户端包含 `id/instance_id/source_address/connected_at/refreshed_at/tags/subscriptions`。`subscriptions` 项包含 `key/id/version/revision/rule_id/deleted/sent`，没有配置正文。`sent:false` 表示尚未成功发送；`sent:true` 表示最近一次成功的 WebSocket 写入，不代表应用确认。beta 显示为 v{version}-beta，规则 ID 区分同名临时版本。
+- 每个客户端包含 `id/instance_id/source_address/connected_at/refreshed_at/tags/subscriptions`。`subscriptions` 项包含 `key/id/version/revision/beta/rule_id/deleted/sent`，没有配置正文。`sent:false` 表示尚未成功发送；`sent:true` 表示最近一次成功的 WebSocket 写入，不代表应用确认。beta 显示为 beta，规则 ID 仅说明首条匹配条件。
 - `GET /api/admin/client-tags?tag=<标签名>&prefix=<前缀>`：返回所有有效实例中对应标签的去重值。省略 tag 返回标签名，始终包含符合前缀的 `sys.ip/sys.hostname`。大小写、空字符串和尾部空格保持字符串语义；prefix 为字面前缀（`%/_` 不是通配符），最多 100 条。继续输入前缀可发现初始列表之外的值。
 - 在线仅指成功升级的 WebSocket 连接，包含暂未订阅的连接；HTTP GET 不记录。标签由客户端传入，远端地址单独展示。
 - 实例每 5 秒同步连接快照，仅写入变化连接，数据库时钟租约 20 秒。正常断连下次同步移除；异常节点过期即不再查询到，每分钟分批清理。网页每 5 秒读取，正常断连约 10 秒内从页面移除。没有远程断开、修改标签等管理操作。

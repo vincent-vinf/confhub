@@ -58,10 +58,11 @@ type Snapshot struct {
 	Content  string `json:"content"`
 	Format   string `json:"format"`
 	RuleID   string `json:"rule_id,omitempty"`
+	Beta     bool   `json:"beta"`
 	Deleted  bool   `json:"deleted"`
 	Source   Source `json:"-"`
 }
 
 func (s Snapshot) valid(key Key) bool {
-	return s.Key == key && s.Sequence >= 0 && s.Revision >= 0 && len(s.Content) <= 1<<20 && utf8.ValidString(s.Content) && (s.Deleted || (s.ID != "" && s.Version > 0 && s.Format != ""))
+	return s.Key == key && s.Sequence >= 0 && s.Revision >= 0 && s.Version >= 0 && len(s.Content) <= 1<<20 && utf8.ValidString(s.Content) && (s.Deleted || (s.ID != "" && ((s.Beta && s.Version == 0 && s.RuleID != "") || (!s.Beta && s.Version > 0)) && s.Format != ""))
 }

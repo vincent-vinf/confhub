@@ -142,15 +142,15 @@ func TestWatchAcceptsLowerVersionsDeletesAndRecreates(t *testing.T) {
 	}
 	next(5, "first", false)
 	<-subscribed
-	updates <- confhub.Snapshot{Key: key, Sequence: 2, ID: "first", Revision: 2, Version: 2, Content: "gray two", Format: "text", RuleID: "gray"}
-	next(2, "first", false)
+	updates <- confhub.Snapshot{Key: key, Sequence: 2, ID: "first", Revision: 2, Version: 0, Beta: true, Content: "gray two", Format: "text", RuleID: "gray"}
+	next(0, "first", false)
 	// An older HTTP response must not roll the live state back.
 	value, err := client.Get(context.Background(), key)
-	if err != nil || value.Version != 2 {
+	if err != nil || (value.Version != 0 || !value.Beta) {
 		t.Fatal("late HTTP response overwrote push", value, err)
 	}
-	updates <- confhub.Snapshot{Key: key, Sequence: 3, ID: "first", Revision: 3, Version: 2, Content: "beta replaced", Format: "text", RuleID: "gray"}
-	if got := next(2, "first", false); got.Content != "beta replaced" {
+	updates <- confhub.Snapshot{Key: key, Sequence: 3, ID: "first", Revision: 3, Version: 0, Beta: true, Content: "beta replaced", Format: "text", RuleID: "gray"}
+	if got := next(0, "first", false); got.Content != "beta replaced" {
 		t.Fatal("same-version content was not delivered", got)
 	}
 	updates <- confhub.Snapshot{Key: key, Sequence: 4, ID: "first", Revision: 4, Deleted: true}
@@ -267,7 +267,7 @@ func TestCacheSurvivesRestartIsScopedAndDeletionClearsIt(t *testing.T) {
 			w.WriteHeader(404)
 			json.NewEncoder(w).Encode(confhub.Snapshot{Key: key, Sequence: 43, Deleted: true})
 		default:
-			json.NewEncoder(w).Encode(confhub.Snapshot{Key: key, Sequence: 42, ID: "original", Revision: 1, Version: 1, Content: "original\n", Format: "text"})
+			json.NewEncoder(w).Encode(confhub.Snapshot{Key: key, Sequence: 42, ID: "original", Revision: 1, Version: 0, Beta: true, RuleID: "gray", Content: "original\n", Format: "text"})
 		}
 	}))
 	defer server.Close()
@@ -291,7 +291,7 @@ func TestCacheSurvivesRestartIsScopedAndDeletionClearsIt(t *testing.T) {
 	}
 	defer client.Close(context.Background())
 	disk, err := client.Get(context.Background(), key)
-	if err != nil || disk.Source != confhub.Disk || disk.Content != "original\n" {
+	if err != nil || disk.Source != confhub.Disk || disk.Content != "original\n" || !disk.Beta || disk.Version != 0 {
 		t.Fatal("disk fallback failed", disk, err)
 	}
 	different := options

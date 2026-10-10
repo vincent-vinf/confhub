@@ -22,7 +22,7 @@ func TestIndependentReplicasConvergeAndUnaffectedGrayClientStaysPinned(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, err = store.SetRules(ctx, k, m.State.ID, m.State.Revision, []config.Rule{{ID: "pin", Enabled: true, Conditions: []config.Condition{{Tag: "env", Operator: "eq", Values: []string{"gray"}}}}})
+	m, err = store.SetRules(ctx, k, m.State.ID, m.State.Revision, []config.Rule{{ID: "pin", Enabled: true, Conditions: []config.Condition{{Tag: "env", Operator: "eq", Values: []string{"gray"}}}}}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,27 +77,27 @@ func TestIndependentReplicasConvergeAndUnaffectedGrayClientStaysPinned(t *testin
 		t.Fatal("unaffected gray client notified")
 	}
 	for _, content := range []string{"beta-one", "beta-two"} {
-		m, err = store.Save(ctx, k, config.Edit{ExpectedID: m.State.ID, ExpectedRevision: m.State.Revision, RuleID: "pin", Content: content, Format: "text"})
+		m, err = store.Save(ctx, k, config.Edit{ExpectedID: m.State.ID, ExpectedRevision: m.State.Revision, Target: "beta", Content: content, Format: "text"})
 		if err != nil {
 			t.Fatal(err)
 		}
 		a.Wake()
 		beta, err := gray.Next(nextCtx)
-		if err != nil || beta.Version != 1 || beta.RuleID != "pin" || beta.Content != content {
+		if err != nil || beta.Version != 0 || !beta.Beta || beta.RuleID != "pin" || beta.Content != content {
 			t.Fatalf("same-name beta update: %+v %v", beta, err)
 		}
 	}
 	// A format change with identical text still changes the effective payload.
-	m, err = store.Save(ctx, k, config.Edit{ExpectedID: m.State.ID, ExpectedRevision: m.State.Revision, RuleID: "pin", Content: "beta-two", Format: "yaml"})
+	m, err = store.Save(ctx, k, config.Edit{ExpectedID: m.State.ID, ExpectedRevision: m.State.Revision, Target: "beta", Content: "beta-two", Format: "yaml"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	a.Wake()
 	formatted, err := gray.Next(nextCtx)
-	if err != nil || formatted.Version != 1 || formatted.Content != "beta-two" || formatted.Format != "yaml" {
+	if err != nil || formatted.Version != 0 || !formatted.Beta || formatted.Content != "beta-two" || formatted.Format != "yaml" {
 		t.Fatalf("format-only beta update: %+v %v", formatted, err)
 	}
-	m, err = store.Save(ctx, k, config.Edit{ExpectedID: m.State.ID, ExpectedRevision: m.State.Revision, RuleID: "pin", Content: "beta-two", Format: "yaml", Description: "metadata only"})
+	m, err = store.Save(ctx, k, config.Edit{ExpectedID: m.State.ID, ExpectedRevision: m.State.Revision, Target: "beta", Content: "beta-two", Format: "yaml", Description: "metadata only"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,7 +2,9 @@
 package server
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"time"
@@ -90,6 +92,23 @@ func (s *Server) respond(c *gin.Context, value any, err error) {
 func bind(c *gin.Context, value any) bool {
 	if err := c.ShouldBindJSON(value); err != nil {
 		c.AbortWithStatusJSON(400, gin.H{"error": "invalid request body"})
+		return false
+	}
+	return true
+}
+
+// Strict management payloads reject retired fields instead of publishing to an
+// unintended target. Keep decode errors specific rather than claiming beta edits.
+func bindStrict(c *gin.Context, value any) bool {
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(value); err != nil {
+		c.AbortWithStatusJSON(400, gin.H{"error": "invalid request body: " + err.Error()})
+		return false
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		c.AbortWithStatusJSON(400, gin.H{"error": "invalid request body: expected one JSON object"})
 		return false
 	}
 	return true

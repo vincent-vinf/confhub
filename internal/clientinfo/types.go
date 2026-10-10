@@ -14,6 +14,7 @@ type Subscription struct {
 	RuleID   string     `json:"rule_id,omitempty"`
 	Deleted  bool       `json:"deleted"`
 	Sent     bool       `json:"sent"`
+	Beta     bool       `json:"beta"`
 }
 type Client struct {
 	ID            string            `json:"id"`

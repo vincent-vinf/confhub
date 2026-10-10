@@ -111,7 +111,9 @@ export function ClientsPage() {
                             ? '等待发送'
                             : sub.deleted
                               ? '配置已删除或不存在'
-                              : `v${sub.version}${sub.rule_id ? '-beta' : ''}`}
+                              : sub.beta
+                                ? 'beta'
+                                : `v${sub.version}`}
                         </Badge>
                         {sub.sent && !sub.deleted && (
                           <small>

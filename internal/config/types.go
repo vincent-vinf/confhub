@@ -55,30 +55,17 @@ type Condition struct {
 	Values   []string `json:"values"`
 }
 
-// Beta is the mutable content owned by one rule. BaseVersion is a label,
-// not a reference that pins a historical main version.
+// Beta is the single mutable gray configuration, independent of main versions.
 type Beta struct {
-	BaseVersion int64  `json:"base_version"`
-	Content     string `json:"content"`
-	Format      string `json:"format"`
-	Description string `json:"description"`
+	Content     string    `json:"content"`
+	Format      string    `json:"format"`
+	Description string    `json:"description"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
-type RuleInput struct {
-	ID         string      `json:"id"`
-	Name       string      `json:"name"`
-	Enabled    bool        `json:"enabled"`
-	Conditions []Condition `json:"conditions"`
-}
-
-func (r RuleInput) Rule() Rule {
-	return Rule{ID: r.ID, Name: r.Name, Enabled: r.Enabled, Conditions: r.Conditions}
-}
-
 type Rule struct {
 	ID         string      `json:"id"`
 	Name       string      `json:"name"`
 	Enabled    bool        `json:"enabled"`
-	Beta       Beta        `json:"beta"`
 	Conditions []Condition `json:"conditions"`
 }
 type State struct {
@@ -89,6 +76,7 @@ type State struct {
 	LastVersion   int64             `json:"last_version"`
 	GlobalVersion int64             `json:"global_version"`
 	Rules         []Rule            `json:"rules"`
+	Beta          *Beta             `json:"beta,omitempty"`
 	Versions      map[int64]Version `json:"versions"`
 }
 type Effective struct {
@@ -100,6 +88,7 @@ type Effective struct {
 	Content  string `json:"content"`
 	Format   string `json:"format"`
 	RuleID   string `json:"rule_id,omitempty"`
+	Beta     bool   `json:"beta"`
 	Deleted  bool   `json:"deleted"`
 }
 type Edit struct {
@@ -108,7 +97,7 @@ type Edit struct {
 	Content          string `json:"content"`
 	Format           string `json:"format"`
 	Description      string `json:"description"`
-	RuleID           string `json:"rule_id,omitempty"`
+	Target           string `json:"target,omitempty"`
 }
 type Mutation struct {
 	State    *State `json:"state"`

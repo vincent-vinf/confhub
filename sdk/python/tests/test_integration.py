@@ -63,6 +63,7 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
                             "expected_id": state["id"],
                             "expected_revision": state["revision"],
                             "confirmed": True,
+                            "source_version": 2,
                             "rules": [
                                 {
                                     "id": "gray",
@@ -77,7 +78,8 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
                     )
                 )["state"]
                 gray = await asyncio.wait_for(received.get(), 5)
-                self.assertEqual((gray.version, gray.rule_id), (2, "gray"))
+                self.assertEqual((gray.version, gray.rule_id), (0, "gray"))
+                self.assertTrue(gray.beta)
                 for content in ("beta one", "beta two"):
                     state = (
                         await request(
@@ -86,7 +88,7 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
                             {
                                 "expected_id": state["id"],
                                 "expected_revision": state["revision"],
-                                "rule_id": "gray",
+                                "target": "beta",
                                 "content": content,
                                 "format": "text",
                                 "confirmed": True,
@@ -95,7 +97,7 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
                     )["state"]
                     value = await asyncio.wait_for(received.get(), 5)
                     self.assertEqual(
-                        (value.version, value.rule_id, value.content), (2, "gray", content)
+                        (value.version, value.rule_id, value.content), (0, "gray", content)
                     )
                 await request(
                     "DELETE",
