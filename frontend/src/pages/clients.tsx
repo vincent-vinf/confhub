@@ -20,21 +20,12 @@ export function ClientsPage() {
     <>
       <div className="page-heading">
         <div>
-          <div className="eyebrow">CLIENTS</div>
           <h1>在线客户端</h1>
-          <p className="page-description">
-            查看 WebSocket 连接、客户端标签和每个订阅已发送的版本。
-          </p>
         </div>
         <Button onClick={() => query.refetch()} busy={query.isFetching}>
           <RefreshCw size={16} aria-hidden="true" />
           刷新
         </Button>
-      </div>
-      <div className="notice info">
-        每 5 秒自动刷新。正常断连约 10 秒内从页面移除；实例异常退出约 20
-        秒过期，再于下一次读取时移除。HTTP GET
-        不计入在线连接。已发送版本表示服务器成功写入连接，客户端应用状态未确认。
       </div>
       <ErrorNotice error={query.error} onRetry={() => query.refetch()} />
       <section className="panel">
@@ -46,7 +37,7 @@ export function ClientsPage() {
           <span className="section-help">
             {query.dataUpdatedAt > 0
               ? `最近读取 ${new Date(query.dataUpdatedAt).toLocaleTimeString('zh-CN', { hour12: false })}`
-              : '正在读取连接快照'}
+              : '正在读取…'}
           </span>
         </div>
         {query.isPending ? (
@@ -92,9 +83,7 @@ export function ClientsPage() {
                       </div>
                     ))}
                 </dl>
-                {!Object.keys(client.tags).length && (
-                  <p className="section-help">此连接未传入标签。</p>
-                )}
+                {!Object.keys(client.tags).length && <p className="section-help">暂无标签</p>}
                 <h3>订阅与已发送版本</h3>
                 <ul className="client-subscriptions">
                   {client.subscriptions.map((sub) => (
@@ -116,37 +105,27 @@ export function ClientsPage() {
                                 : `v${sub.version}`}
                         </Badge>
                         {sub.sent && !sub.deleted && (
-                          <small>
-                            修订 {sub.revision}
-                            {sub.rule_id ? ` · 规则 ${sub.rule_id}` : ' · 全量'}
-                          </small>
+                          <small>{sub.rule_id ? `规则 ${sub.rule_id}` : '全量'}</small>
                         )}
                         {sub.id && <small>配置 ID {sub.id}</small>}
                       </div>
                     </li>
                   ))}
                 </ul>
-                {!client.subscriptions.length && (
-                  <p className="section-help">已连接，尚未订阅配置。</p>
-                )}
+                {!client.subscriptions.length && <p className="section-help">暂无订阅</p>}
               </article>
             ))}
           </div>
         ) : !query.error ? (
           <Empty
             title={after ? '这一页已无在线连接' : '暂无在线客户端'}
-            description={
-              after
-                ? '连接列表会变化，可以返回第一页重新查看。'
-                : '客户端建立 WebSocket 连接后将显示在这里。'
-            }
             action={
               after ? <Button onClick={() => setCursors([''])}>返回第一页</Button> : undefined
             }
           />
         ) : null}
         <div className="table-footer">
-          <span className="section-help">本页 {query.data?.clients.length ?? 0} 个连接 · 只读</span>
+          <span className="section-help">本页 {query.data?.clients.length ?? 0} 个连接</span>
           <div className="pagination">
             <Button
               aria-label="上一页客户端"

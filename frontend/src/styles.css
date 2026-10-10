@@ -96,27 +96,27 @@ body {
 }
 button,
 input,
-select,
+.select-trigger,
 textarea {
   font: inherit;
 }
 button,
 a,
-select,
+.select-trigger,
 input[type='checkbox'] {
   touch-action: manipulation;
 }
 button,
 a,
-select {
+.select-trigger {
   -webkit-tap-highlight-color: transparent;
 }
 button,
-select {
+.select-trigger {
   cursor: pointer;
 }
 button:disabled,
-select:disabled {
+.select-trigger:disabled {
   cursor: not-allowed;
 }
 button {
@@ -163,7 +163,7 @@ svg {
   outline-offset: 3px;
 }
 input,
-select,
+.select-trigger,
 textarea {
   color: var(--text);
   background: var(--surface);
@@ -305,6 +305,9 @@ a.button:hover {
 }
 .destructive-text {
   color: var(--error);
+}
+.success-text {
+  color: var(--accent-text);
 }
 .badge {
   display: inline-flex;
@@ -534,15 +537,6 @@ a.button:hover {
   margin: 4px 0 20px 14px;
   font-size: 12px;
 }
-.sidebar-caption {
-  color: var(--nav-muted);
-  border-top: 1px solid #314450;
-  padding-top: 16px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-}
 .workspace {
   grid-column: 2;
   display: flex;
@@ -680,7 +674,7 @@ a.button:hover {
   color: var(--muted);
   font-size: 12px;
 }
-.scope-bar select {
+.scope-bar .select-trigger {
   font-family: 'JetBrains Mono', monospace;
   width: 175px;
   min-height: 36px;
@@ -903,7 +897,7 @@ tbody tr:hover {
   font-size: 12px;
   color: var(--muted);
 }
-.editor-toolbar select {
+.editor-toolbar .select-trigger {
   font-size: 12px;
   min-height: 34px;
   padding: 6px 10px;
@@ -1011,12 +1005,12 @@ tbody tr:hover {
   padding: 17px 20px;
   border-top: 1px solid var(--border);
 }
-.editor-footer > .button:only-child {
+.editor-footer > .button:only-child,
+.editor-footer > .button-row:only-child {
   margin-left: auto;
 }
-.editor-footer-help {
-  color: var(--muted);
-  font-size: 12px;
+.history-pagination {
+  justify-content: flex-end;
 }
 .create-fields {
   display: grid;
@@ -1030,8 +1024,8 @@ tbody tr:hover {
   font-size: 12px;
 }
 .create-fields input,
-.create-fields select {
-  display: block;
+.create-fields .select-trigger {
+  display: flex;
   width: 100%;
   margin-top: 8px;
 }
@@ -1156,7 +1150,7 @@ tbody tr:hover {
   font-size: 12px;
   gap: 9px;
 }
-.diff-toolbar select {
+.diff-toolbar .select-trigger {
   max-width: 330px;
   font-size: 12px;
 }
@@ -1232,7 +1226,7 @@ tbody tr:hover {
   gap: 20px;
 }
 .form-stack input,
-.form-stack select {
+.form-stack .select-trigger {
   width: 100%;
 }
 .form-stack input[type='checkbox'] {
@@ -1254,7 +1248,7 @@ tbody tr:hover {
   white-space: nowrap;
   font-size: 12px;
 }
-.history-toolbar select {
+.history-toolbar .select-trigger {
   font-size: 12px;
 }
 .history-description {
@@ -1623,20 +1617,6 @@ tbody tr:hover {
   font-size: 21px;
   margin-bottom: 6px;
 }
-.account-note {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  text-align: left;
-  border-top: 1px solid var(--border);
-  padding-top: 24px;
-  margin-top: 28px;
-  color: var(--muted);
-  font-size: 12px;
-}
-.account-note p {
-  margin: 0;
-}
 .toast-region {
   position: fixed;
   bottom: 24px;
@@ -1713,24 +1693,6 @@ tbody tr:hover {
   font-weight: 500;
   letter-spacing: 0.015em;
 }
-.login-copy > p {
-  color: var(--nav-muted);
-  font-size: 15px;
-  line-height: 1.9;
-}
-.login-features {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 30px;
-}
-.login-features span {
-  font-size: 12px;
-  padding: 5px 10px;
-  border: 1px solid #46606e;
-  color: #c7d9de;
-  border-radius: 5px;
-}
 .login-story > small {
   color: var(--nav-muted);
   font-size: 12px;
@@ -1772,23 +1734,11 @@ tbody tr:hover {
 }
 .login-card h2 {
   font-size: 25px;
-  margin-bottom: 8px;
-}
-.login-card > p {
-  color: var(--muted);
-  font-size: 13px;
-  margin-bottom: 30px;
+  margin-bottom: 24px;
 }
 .login-card .button {
   min-height: 44px;
   margin-top: 3px;
-}
-.login-help {
-  border-top: 1px solid var(--border);
-  padding-top: 20px;
-  margin-top: 26px;
-  color: var(--muted);
-  font-size: 12px;
 }
 .mobile-menu,
 .mobile-nav-scrim {
@@ -1801,7 +1751,7 @@ tbody tr:hover {
   .scope-bar {
     gap: 13px;
   }
-  .scope-bar select {
+  .scope-bar .select-trigger {
     width: 140px;
   }
   .scope-manage {
@@ -1847,7 +1797,7 @@ tbody tr:hover {
   .scope-divider {
     display: none;
   }
-  .scope-bar select {
+  .scope-bar .select-trigger {
     width: 185px;
   }
   .organization-layout {
@@ -1883,7 +1833,7 @@ tbody tr:hover {
     font-size: 15px;
   }
   input,
-  select,
+  .select-trigger,
   textarea {
     font-size: 16px;
     min-height: 44px;
@@ -1978,7 +1928,7 @@ tbody tr:hover {
     flex: 1;
     min-width: 0;
   }
-  .scope-bar select {
+  .scope-bar .select-trigger {
     width: 100%;
     font-size: 13px;
     min-height: 40px;
@@ -2080,7 +2030,7 @@ tbody tr:hover {
     flex: 1;
     min-width: 0;
   }
-  .edit-target select {
+  .edit-target .select-trigger {
     max-width: 100%;
     flex: 1;
     min-width: 0;
@@ -2089,8 +2039,8 @@ tbody tr:hover {
     justify-content: space-between;
     width: 100%;
   }
-  .editor-options select,
-  .editor-toolbar select {
+  .editor-options .select-trigger,
+  .editor-toolbar .select-trigger {
     font-size: 14px;
     min-height: 38px;
   }
@@ -2160,7 +2110,7 @@ tbody tr:hover {
     width: 100%;
     flex-wrap: wrap;
   }
-  .diff-toolbar select {
+  .diff-toolbar .select-trigger {
     max-width: 100%;
     flex: 1;
     min-width: 0;
@@ -2282,7 +2232,7 @@ tbody tr:hover {
   .history-compare-controls label {
     flex-direction: column;
   }
-  .history-compare-controls select {
+  .history-compare-controls .select-trigger {
     min-width: 100px;
   }
   .login-page {
@@ -2301,9 +2251,7 @@ tbody tr:hover {
   .login-copy > p {
     font-size: 13px;
   }
-  .login-story > small,
-  .login-features,
-  .login-copy .eyebrow {
+  .login-story > small {
     display: none;
   }
   .login-story::after {
@@ -2489,5 +2437,104 @@ tbody tr:hover {
   .client-version {
     text-align: left;
     margin-top: 8px;
+  }
+}
+
+/* Shared selection menus use the same semantic tokens as fields and tag suggestions. */
+.select-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  text-align: left;
+  line-height: 1.5;
+  font-weight: 400;
+  cursor: pointer;
+}
+.select-trigger > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.select-chevron {
+  display: flex;
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.select-trigger:hover:not(:disabled),
+.select-trigger[data-state='open'] {
+  border-color: var(--accent);
+}
+input:disabled,
+textarea:disabled,
+.select-trigger:disabled {
+  background: var(--surface-subtle);
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.select-content {
+  z-index: 150;
+  min-width: var(--radix-select-trigger-width);
+  max-width: calc(100vw - 32px);
+  max-height: min(320px, var(--radix-select-content-available-height));
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--input-border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.select-viewport {
+  padding: 5px;
+}
+.select-option {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 8px 34px 8px 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  border-radius: 4px;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  user-select: none;
+}
+.select-option[data-state='checked'] {
+  color: var(--accent-text);
+  background: var(--accent-soft);
+}
+.select-option[data-highlighted] {
+  color: var(--on-accent);
+  background: var(--accent);
+  outline: none;
+}
+.select-option[data-disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.select-indicator {
+  position: absolute;
+  right: 10px;
+  display: flex;
+}
+.select-scroll {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  color: var(--muted);
+  background: var(--surface);
+}
+@media (max-width: 767px), (pointer: coarse) {
+  .select-trigger,
+  .scope-bar .select-trigger,
+  .editor-toolbar .select-trigger {
+    min-height: 44px;
+  }
+  .select-option {
+    min-height: 44px;
   }
 }

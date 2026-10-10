@@ -1,3 +1,4 @@
+import { Select } from '../components/select'
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
@@ -87,7 +88,6 @@ export function ConfigListPage() {
     <>
       <div className="page-heading">
         <div>
-          <span className="eyebrow">CONFIGURATIONS</span>
           <h1>配置管理</h1>
         </div>
         <Link
@@ -105,22 +105,30 @@ export function ConfigListPage() {
       <div className="scope-bar">
         <label>
           命名空间
-          <select value={namespace} onChange={(e) => changeNamespace(e.target.value)}>
+          <Select
+            aria-label="命名空间"
+            value={namespace}
+            onValueChange={(value) => changeNamespace(value)}
+          >
             {namespaces.data?.map((n) => (
               <option key={n}>{n}</option>
             ))}
             {!namespaces.data?.includes(namespace) && <option>{namespace}</option>}
-          </select>
+          </Select>
         </label>
         <span className="scope-divider" />
         <label>
           分组
-          <select value={group} onChange={(e) => setParams({ namespace, group: e.target.value })}>
+          <Select
+            aria-label="分组"
+            value={group}
+            onValueChange={(value) => setParams({ namespace, group: value })}
+          >
             {groups.data?.map((g) => (
               <option key={g}>{g}</option>
             ))}
             {!groups.data?.includes(group) && <option>{group}</option>}
-          </select>
+          </Select>
         </label>
         <Link className="scope-manage" to="/organization">
           管理命名空间 <ArrowRight size={14} aria-hidden="true" />
@@ -180,7 +188,6 @@ export function ConfigListPage() {
                   <tr>
                     <th>配置名称</th>
                     <th>全量版本</th>
-                    <th>编辑修订</th>
                     <th>
                       <span className="sr-only">操作</span>
                     </th>
@@ -200,7 +207,6 @@ export function ConfigListPage() {
                       <td>
                         <Badge tone="success">v{config.global_version}</Badge>
                       </td>
-                      <td className="muted mono">r{config.revision}</td>
                       <td>
                         <Link
                           to={configUrl(config.key)}
@@ -219,11 +225,6 @@ export function ConfigListPage() {
           ) : (
             <Empty
               title={searchQuery ? '没有找到匹配的配置' : '这个分组还没有配置'}
-              description={
-                searchQuery
-                  ? '试试其他名称，或清除搜索查看全部配置。'
-                  : '从第一份配置开始，发布每一次经过确认的变更。'
-              }
               action={
                 searchQuery ? (
                   <Button onClick={() => setSearch('')}>清除搜索</Button>
@@ -240,9 +241,7 @@ export function ConfigListPage() {
           ))
         )}
         <div className="table-footer">
-          <span>
-            {rows?.length ?? 0} 项{searchQuery ? ' · 搜索整个分组' : ' · 按名称排序'}
-          </span>
+          <span>{rows?.length ?? 0} 项</span>
           <div className="pagination">
             <Button
               aria-label="上一页"

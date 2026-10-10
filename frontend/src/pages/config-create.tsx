@@ -1,3 +1,4 @@
+import { Select } from '../components/select'
 import { useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
@@ -99,7 +100,6 @@ export function ConfigCreatePage() {
       </div>
       <div className="page-heading">
         <div>
-          <span className="eyebrow">NEW CONFIGURATION</span>
           <h1>新建配置</h1>
         </div>
         <span className="heading-icon">
@@ -110,26 +110,27 @@ export function ConfigCreatePage() {
         <div className="create-fields">
           <label>
             命名空间
-            <select
+            <Select
+              aria-label="命名空间"
               value={namespace}
-              onChange={(e) => {
-                setNamespace(e.target.value)
+              onValueChange={(value) => {
+                setNamespace(value)
                 setGroup('')
               }}
             >
               {namespaces.data?.map((n) => (
                 <option key={n}>{n}</option>
               ))}
-            </select>
+            </Select>
           </label>
           <label>
             分组
-            <select value={group} onChange={(e) => setGroup(e.target.value)}>
+            <Select aria-label="分组" value={group} onValueChange={(value) => setGroup(value)}>
               <option value="">选择分组</option>
               {groups.data?.map((g) => (
                 <option key={g}>{g}</option>
               ))}
-            </select>
+            </Select>
           </label>
           <label>
             配置名称 <span className="required">*</span>
@@ -151,17 +152,17 @@ export function ConfigCreatePage() {
           <div className="editor-options">
             <label>
               格式
-              <select
+              <Select
                 aria-label="配置格式"
                 value={draft.format}
-                onChange={(e) => setDraft({ ...draft, format: e.target.value as Draft['format'] })}
+                onValueChange={(value) => setDraft({ ...draft, format: value as Draft['format'] })}
               >
                 {formats.map((format) => (
                   <option key={format} value={format}>
                     {format === 'text' ? '纯文本' : format.toUpperCase()}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
             <Button
               variant="ghost"

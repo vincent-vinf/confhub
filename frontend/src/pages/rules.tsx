@@ -1,3 +1,4 @@
+import { Select } from '../components/select'
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -201,9 +202,6 @@ export function RulesPanel({
               <GitBranch size={18} aria-hidden="true" />
               灰度规则 <Badge>{state.rules.length}</Badge>
             </div>
-            <p className="section-help">
-              从上到下匹配，第一条命中使用唯一 beta；未命中使用全量 v{state.global_version}。
-            </p>
           </div>
           <Button
             variant="primary"
@@ -248,7 +246,6 @@ export function RulesPanel({
                     <Badge tone={rule.enabled ? 'success' : 'neutral'}>
                       {rule.enabled ? '启用' : '停用'}
                     </Badge>
-                    <Badge>beta</Badge>
                   </div>
                   <RuleConditions rule={rule} />
                 </div>
@@ -263,7 +260,7 @@ export function RulesPanel({
                   </Button>
                   <Button
                     variant="ghost"
-                    className="icon-button"
+                    className={`icon-button ${rule.enabled ? 'destructive-text' : 'success-text'}`}
                     aria-label={`${rule.enabled ? '停用' : '启用'}规则 ${rule.name || rule.id}`}
                     onClick={() =>
                       review(
@@ -294,10 +291,7 @@ export function RulesPanel({
             ))}
           </div>
         ) : (
-          <Empty
-            title="当前使用全量发布"
-            description="创建第一条规则时选择主版本复制为 beta；所有命中的规则共享它。"
-          />
+          <Empty title="当前使用全量发布" />
         )}
       </section>
       {state.beta && (
@@ -305,9 +299,8 @@ export function RulesPanel({
           <div className="panel-toolbar">
             <div>
               <div className="panel-title">
-                <Badge>beta</Badge>唯一灰度配置
+                <Badge>beta</Badge>灰度配置
               </div>
-              <p className="section-help">所有启用且命中的规则使用同一份内容；编辑不产生新版本。</p>
             </div>
             <div className="button-row">
               <Button onClick={onEditBeta}>
@@ -325,7 +318,6 @@ export function RulesPanel({
           open
           onClose={() => setEditing(undefined)}
           title={state.rules.some((r) => r.id === editing.id) ? '修改灰度规则' : '新增灰度规则'}
-          description="一条规则内的条件全部满足时匹配；多个规则可表达不同客户端范围。"
           wide
           footer={
             <>
@@ -339,10 +331,10 @@ export function RulesPanel({
           {!state.beta && (
             <label>
               beta 复制来源
-              <select
+              <Select
                 aria-label="beta 复制来源"
                 value={sourceVersion}
-                onChange={(event) => setSourceVersion(Number(event.target.value))}
+                onValueChange={(value) => setSourceVersion(Number(value))}
                 disabled={versions.isPending}
               >
                 <option value={0}>请选择主版本</option>
@@ -353,10 +345,7 @@ export function RulesPanel({
                     {version.description ? ` · ${version.description}` : ''}
                   </option>
                 ))}
-              </select>
-              <span className="section-help">
-                仅创建第一条规则时复制一次，beta 保存后与来源版本无关。
-              </span>
+              </Select>
             </label>
           )}
           {!state.beta && <ErrorNotice error={versions.error} onRetry={() => versions.refetch()} />}
@@ -372,7 +361,6 @@ export function RulesPanel({
             if (!editing) setError(undefined)
           }}
           title={pending.title}
-          description="确认后立即生效。客户端将按新的顺序与标签条件重新匹配有效版本。"
           wide
           busy={busy}
           footer={
@@ -394,15 +382,12 @@ export function RulesPanel({
           }
         >
           <div className="notice info">
-            全量仍为 v{state.global_version}
-            。规则停用保留 beta；仅删除最后一条规则时清除
-            beta。停用或移除后继续匹配后面的规则，全部未命中才使用全量。
+            {pending.rules.length === 0 && state.beta
+              ? '删除最后一条规则将同时删除 beta 配置。'
+              : `全量 v${state.global_version} 保持不变。`}
           </div>
           {pending.sourceVersion && (
-            <div className="notice info">
-              从主版本 v{pending.sourceVersion} 复制内容与格式，创建唯一 beta
-              配置。该来源不会随全量变更自动切换。
-            </div>
+            <div className="notice info">从主版本 v{pending.sourceVersion} 复制为 beta 配置。</div>
           )}
           <div className="rule-comparison">
             <div>
@@ -474,7 +459,6 @@ function RuleSummary({ rules }: { rules: GrayRule[] }) {
         <li key={rule.id}>
           <div>
             <strong>{rule.name || '未命名规则'}</strong>
-            <Badge>beta</Badge>
             <Badge tone={rule.enabled ? 'success' : 'neutral'}>
               {rule.enabled ? '启用' : '停用'}
             </Badge>
@@ -484,7 +468,7 @@ function RuleSummary({ rules }: { rules: GrayRule[] }) {
       ))}
     </ol>
   ) : (
-    <p className="muted">没有灰度规则，全部使用全量版本。</p>
+    <p className="muted">没有灰度规则。</p>
   )
 }
 function RuleForm({ rule, onChange }: { rule: GrayRule; onChange: (rule: GrayRule) => void }) {
@@ -502,9 +486,6 @@ function RuleForm({ rule, onChange }: { rule: GrayRule; onChange: (rule: GrayRul
           />
         </label>
       </div>
-      <p className="section-help">
-        规则仅指定匹配范围，命中后使用唯一 beta 配置。关闭保留 beta，删除最后一条规则清除 beta。
-      </p>
       <label className="check-label">
         <input
           type="checkbox"
@@ -546,37 +527,29 @@ function RuleForm({ rule, onChange }: { rule: GrayRule; onChange: (rule: GrayRul
                 </label>
                 <label>
                   匹配方式
-                  <select
+                  <Select
                     aria-label={`条件 ${index + 1} 匹配方式`}
                     value={condition.operator}
-                    onChange={(e) =>
+                    onValueChange={(value) =>
                       updateCondition(index, {
                         ...condition,
-                        operator: e.target.value as Condition['operator'],
+                        operator: value as Condition['operator'],
                         values:
-                          e.target.value === 'eq'
+                          value === 'eq'
                             ? [condition.values[0] ?? '']
-                            : e.target.value === 'ip_range'
+                            : value === 'ip_range'
                               ? [condition.values[0] ?? '', condition.values[1] ?? '']
                               : condition.values,
-                        tag:
-                          !condition.tag && e.target.value === 'ip_range'
-                            ? 'sys.ip'
-                            : condition.tag,
+                        tag: !condition.tag && value === 'ip_range' ? 'sys.ip' : condition.tag,
                       })
                     }
                   >
                     <option value="eq">等于</option>
                     <option value="in">属于指定值集合</option>
                     <option value="ip_range">IP 区间（含起止地址）</option>
-                  </select>
+                  </Select>
                 </label>
               </div>
-              {condition.operator === 'ip_range' && (
-                <p className="section-help">
-                  填写完整 IPv4 或 IPv6 地址，包含起止地址；两个地址必须同族，起始不得大于结束。
-                </p>
-              )}
               <div className="condition-values">
                 {condition.values.map((value, valueIndex) => (
                   <div className="tag-value-row" key={valueIndex}>
@@ -705,7 +678,6 @@ function Simulation({ configKey, state }: { configKey: ConfigKey; state: ConfigS
             <FlaskConical size={18} aria-hidden="true" />
             标签试算
           </div>
-          <p className="section-help">输入客户端标签，查看它会使用哪个版本。不会发布任何变更。</p>
         </div>
       </div>
       <div className="simulation-body">
@@ -762,7 +734,7 @@ function Simulation({ configKey, state }: { configKey: ConfigKey; state: ConfigS
         <div className="simulation-result" aria-live="polite">
           {result ? (
             <>
-              <span className="eyebrow">EFFECTIVE VERSION</span>
+              <span className="eyebrow">匹配结果</span>
               <strong className="simulation-version">
                 {result.beta ? 'beta' : `v${result.version}`}
               </strong>
@@ -778,7 +750,7 @@ function Simulation({ configKey, state }: { configKey: ConfigKey; state: ConfigS
           ) : (
             <>
               <FlaskConical size={28} aria-hidden="true" />
-              <p>试算结果将显示在这里</p>
+              <p>暂无试算结果</p>
             </>
           )}
         </div>

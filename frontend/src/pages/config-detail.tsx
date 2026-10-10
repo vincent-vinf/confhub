@@ -1,3 +1,4 @@
+import { Select } from '../components/select'
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
@@ -222,12 +223,12 @@ function Detail({ configKey }: { configKey: ConfigKey }) {
             <div className="edit-target">
               <label>
                 编辑目标
-                <select
+                <Select
                   aria-label="编辑目标"
                   value={draft.target ?? 'global'}
-                  onChange={(e) => {
+                  onValueChange={(value) => {
                     const next = {
-                      target: e.target.value === 'beta' ? ('beta' as const) : undefined,
+                      target: value === 'beta' ? ('beta' as const) : undefined,
                     }
                     if (dirty) setPendingTarget(next)
                     else switchTarget(next.target)
@@ -238,18 +239,18 @@ function Detail({ configKey }: { configKey: ConfigKey }) {
                   {draft.target === 'beta' && !target && (
                     <option value="beta">已删除的 beta · 草稿保留</option>
                   )}
-                </select>
+                </Select>
               </label>
               {target && <Badge>{target.format.toUpperCase()}</Badge>}
             </div>
             <div className="editor-options">
               <label>
                 格式
-                <select
+                <Select
                   aria-label="配置格式"
                   value={draft.format}
-                  onChange={(e) => {
-                    setDraft({ ...draft, format: e.target.value as Draft['format'] })
+                  onValueChange={(value) => {
+                    setDraft({ ...draft, format: value as Draft['format'] })
                     setError(undefined)
                   }}
                 >
@@ -258,7 +259,7 @@ function Detail({ configKey }: { configKey: ConfigKey }) {
                       {format === 'text' ? '纯文本' : format.toUpperCase()}
                     </option>
                   ))}
-                </select>
+                </Select>
               </label>
               <Button
                 variant="ghost"
@@ -301,8 +302,7 @@ function Detail({ configKey }: { configKey: ConfigKey }) {
               )}
             </span>
             <span className="mono">
-              {draft.format.toUpperCase()} · {bytes(draft.content).toLocaleString()} 字节 · r
-              {baseline.revision}
+              {draft.format.toUpperCase()} · {bytes(draft.content).toLocaleString()} 字节
             </span>
           </div>
           <div className="editor-description">
@@ -317,11 +317,6 @@ function Detail({ configKey }: { configKey: ConfigKey }) {
             />
           </div>
           <div className="editor-footer">
-            <div className="editor-footer-help">
-              {draft.target === 'beta'
-                ? '保存覆盖唯一 beta 配置，所有命中的客户端立即生效，不保留修改历史。'
-                : '保存即全量发布，beta 配置保持不变。'}
-            </div>
             <div className="button-row">
               <Button
                 variant="ghost"

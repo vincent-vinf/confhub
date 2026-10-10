@@ -68,22 +68,11 @@ export function LoginPage() {
           <span>ConfHub</span>
         </a>
         <div className="login-copy">
-          <span className="eyebrow">CONFIGURATION, SIMPLIFIED</span>
           <h1>
             每一次变更，
             <br />
             都清晰可控。
           </h1>
-          <p>
-            集中管理配置，让发布、灰度与回退
-            <br className="desktop-only" />
-            回到简单而可靠的工作流。
-          </p>
-          <div className="login-features">
-            <span>版本可追溯</span>
-            <span>灰度可控</span>
-            <span>变更可比较</span>
-          </div>
         </div>
         <small>ConfHub · 轻量配置中心</small>
       </section>
@@ -93,9 +82,7 @@ export function LoginPage() {
             <LockKeyhole size={22} aria-hidden="true" />
           </div>
           <h2>登录控制台</h2>
-          <p>使用管理员账户管理你的配置。</p>
           <LoginForm />
-          <div className="login-help">首次登录请使用部署时设置的管理员密码。</div>
         </div>
       </section>
     </main>

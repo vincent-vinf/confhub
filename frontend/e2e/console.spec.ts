@@ -39,6 +39,10 @@ async function save(
   expect(response.ok()).toBeTruthy()
   return (await response.json()).state
 }
+async function choose(page: Page, label: string, option: string | RegExp) {
+  await page.getByRole('combobox', { name: label, exact: true }).click()
+  await page.getByRole('option', { name: option, exact: typeof option === 'string' }).click()
+}
 async function edit(page: Page, content: string) {
   await page.getByRole('textbox', { name: '配置内容', exact: true }).fill(content)
 }
@@ -66,7 +70,7 @@ test('登录失败、真实创建、语法校验、格式化撤销和保存确�
   await page.getByRole('button', { name: '登录控制台' }).click()
   await page.getByRole('link', { name: '新建配置', exact: true }).click()
   await page.getByLabel('配置名称').fill('创建-测试.json')
-  await page.getByLabel('配置格式').selectOption('json')
+  await choose(page, '配置格式', 'JSON')
   await edit(page, '{invalid')
   await page.getByRole('button', { name: '保存并发布' }).click()
   await expect(page.getByRole('alert')).toContainText('JSON 语法错误')
@@ -98,7 +102,7 @@ test('历史查看、任意版本比较、切换比较保持保存基准、回�
   await page.goto(url(name))
   await edit(page, '{"v":3}')
   await page.getByRole('button', { name: '保存并发布' }).click()
-  await page.getByLabel('对比版本', { exact: true }).selectOption('1')
+  await choose(page, '对比版本', /^v1(?: ·|$)/)
   const saveRequest = page.waitForRequest(
     (request) => request.method() === 'PUT' && request.url().endsWith(path(name)),
   )
@@ -113,8 +117,8 @@ test('历史查看、任意版本比较、切换比较保持保存基准、回�
   await page.getByRole('button', { name: '关闭', exact: true }).click()
   await expect(page.getByRole('button', { name: '查看 v1', exact: true })).toBeFocused()
   await page.getByRole('button', { name: '比较 v2', exact: true }).click()
-  await page.getByLabel('左侧版本').selectOption('1')
-  await page.getByLabel('右侧版本').selectOption('3')
+  await choose(page, '左侧版本', 'v1')
+  await choose(page, '右侧版本', 'v3')
   await expect(page.getByRole('textbox', { name: '对比版本内容' })).toHaveText('{"v":1}')
   await expect(page.getByRole('textbox', { name: '待发布内容' })).toHaveText('{"v":3}')
   await page.getByRole('button', { name: '关闭', exact: true }).click()
@@ -151,7 +155,7 @@ test('共享 beta 原位编辑、前后 diff、主历史、转全量及关闭重
   s = await state(page.request, name)
   expect(s.global_version).toBe(3)
   expect(s.beta.content).toBe('{"v":2}')
-  await page.getByLabel('编辑目标', { exact: true }).selectOption('beta')
+  await choose(page, '编辑目标', 'beta 配置')
   await expect(page.getByRole('textbox', { name: '配置内容', exact: true })).toHaveText('{"v":2}')
   for (const [before, after] of [
     [2, 4],
@@ -522,11 +526,11 @@ test('YAML 多文档格式化可撤销，所有支持格式均能切换高亮', 
     ['json', '{"a":"test"}'],
     ['yaml', 'a: test'],
   ]) {
-    await page.getByLabel('配置格式').selectOption(format)
+    await choose(page, '配置格式', format === 'text' ? '纯文本' : format.toUpperCase())
     await edit(page, content)
     await expect(page.locator('.cm-line span').first()).toBeVisible()
   }
-  await page.getByLabel('配置格式').selectOption('text')
+  await choose(page, '配置格式', '纯文本')
   await edit(page, 'plain content')
   await expect(page.getByRole('textbox', { name: '配置内容', exact: true })).toHaveText(
     'plain content',
@@ -577,7 +581,7 @@ test('同名 beta 并发冲突重新比较当前正文，保留草稿且不创�
   expect(response.ok()).toBeTruthy()
   s = (await response.json()).state
   await page.goto(url(name))
-  await page.getByLabel('编辑目标', { exact: true }).selectOption('beta')
+  await choose(page, '编辑目标', 'beta 配置')
   await edit(page, '{"v":"draft"}')
   await save(page.request, name, '{"v":"concurrent"}', s, 'beta')
   await page.getByRole('button', { name: '保存并发布' }).click()
@@ -700,7 +704,7 @@ test('在线客户端只读展示、标签补全与 IP 区间规则', async ({ p
   await tag.press('ArrowDown')
   await tag.press('Enter')
   await expect(tag).toHaveValue('sys.ip')
-  await page.getByLabel('条件 1 匹配方式').selectOption('ip_range')
+  await choose(page, '条件 1 匹配方式', 'IP 区间（含起止地址）')
   await page.getByLabel('条件 1 起始 IP').fill('192.168.2.5')
   await page.getByLabel('条件 1 结束 IP').fill('192.168.2.1')
   await page.getByRole('button', { name: '查看影响并确认' }).click()
@@ -798,7 +802,7 @@ test('唯一 beta 历史置顶编辑、选择旧来源、多规则共享与删�
   s = await save(page.request, name, '{"global":2}', s)
   await page.goto(`${url(name)}?tab=rules`)
   await page.getByRole('button', { name: '新增规则', exact: true }).click()
-  await page.getByLabel('beta 复制来源', { exact: true }).selectOption('1')
+  await choose(page, 'beta 复制来源', /^v1(?: ·|$)/)
   await page.getByLabel('规则名称', { exact: true }).fill('范围 A')
   await page.getByLabel('条件 1 标签名称', { exact: true }).fill('env')
   await page.getByLabel('条件 1 标签值 1', { exact: true }).fill('a')
@@ -813,16 +817,18 @@ test('唯一 beta 历史置顶编辑、选择旧来源、多规则共享与删�
   await page.getByRole('button', { name: '查看影响并确认' }).click()
   await confirmRule(page)
   await page.getByRole('tab', { name: '配置内容' }).click()
-  await expect(page.getByLabel('编辑目标', { exact: true }).locator('option')).toHaveCount(2)
-  await expect(
-    page.getByLabel('编辑目标', { exact: true }).locator('option[value=beta]'),
-  ).toHaveText('beta 配置')
+  await page.getByRole('combobox', { name: '编辑目标', exact: true }).click()
+  await expect(page.getByRole('option')).toHaveCount(2)
+  await expect(page.getByRole('option', { name: 'beta 配置', exact: true })).toBeVisible()
+  await page.keyboard.press('Escape')
   await page.getByRole('tab', { name: '版本历史' }).click()
   const first = page.locator('tbody tr').first()
   await expect(first).toContainText('beta')
   await expect(first.getByRole('button', { name: /回退/ })).toHaveCount(0)
   await first.getByRole('button', { name: '编辑 beta', exact: true }).click()
-  await expect(page.getByLabel('编辑目标', { exact: true })).toHaveValue('beta')
+  await expect(page.getByRole('combobox', { name: '编辑目标', exact: true })).toHaveText(
+    'beta 配置',
+  )
   await expect(page.getByRole('textbox', { name: '配置内容', exact: true })).toHaveText(
     '{"source":1}',
   )
@@ -863,7 +869,7 @@ test('唯一 beta 历史置顶编辑、选择旧来源、多规则共享与删�
   expect((await state(page.request, name)).beta).toBeUndefined()
   await page.getByRole('button', { name: '新增规则', exact: true }).click()
   await expect(page.getByLabel('beta 复制来源', { exact: true })).toBeVisible()
-  await page.getByLabel('beta 复制来源', { exact: true }).selectOption('2')
+  await choose(page, 'beta 复制来源', /^v2(?: ·|$)/)
   await page.getByLabel('条件 1 标签名称', { exact: true }).fill('env')
   await page.getByLabel('条件 1 标签值 1', { exact: true }).fill('a')
   await page.getByRole('button', { name: '查看影响并确认' }).click()
@@ -915,8 +921,10 @@ test('规则冲突时 beta 被删除需重选来源并保留草稿，元数据�
   await removeAll()
   await triggerConflict()
   await expect(page.getByLabel('规则名称', { exact: true })).toHaveValue('保留的草稿')
-  await expect(page.getByLabel('beta 复制来源', { exact: true })).toHaveValue('0')
-  await page.getByLabel('beta 复制来源', { exact: true }).selectOption('1')
+  await expect(page.getByRole('combobox', { name: 'beta 复制来源', exact: true })).toHaveText(
+    '请选择主版本',
+  )
+  await choose(page, 'beta 复制来源', /^v1(?: ·|$)/)
   await page.getByRole('button', { name: '查看影响并确认' }).click()
   await confirmRule(page)
   s = await state(page.request, name)
@@ -929,4 +937,79 @@ test('规则冲突时 beta 被删除需重选来源并保留草稿，元数据�
   await expect(page.getByRole('dialog')).not.toBeVisible()
   await expect(page.getByRole('alert')).toContainText('原规则操作无法继续')
   expect((await state(page.request, name)).beta).toBeUndefined()
+})
+
+test('统一下拉菜单主题、键盘、长选项与弹窗内 Escape', async ({ page }) => {
+  await login(page)
+  const group = page.getByRole('combobox', { name: '分组', exact: true })
+  await group.focus()
+  await group.press('ArrowDown')
+  const list = page.getByRole('listbox')
+  await expect(list).toBeVisible()
+  await expect(list).toHaveCSS('background-color', 'rgb(255, 255, 255)')
+  await expect(page.getByRole('option', { name: 'DEFAULT_GROUP', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  )
+  expect(
+    (await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze()).violations,
+  ).toEqual([])
+  await page.screenshot({ path: '../docs/images/frontend/select-light.png', fullPage: true })
+  await page.keyboard.press('Escape')
+  await expect(group).toBeFocused()
+  await page.getByRole('button', { name: '切换深色主题' }).click()
+  await group.click()
+  await expect(list).toHaveCSS('background-color', 'rgb(28, 43, 53)')
+  expect(
+    (await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze()).violations,
+  ).toEqual([])
+  await page.keyboard.press('Escape')
+  const name = 'select-keyboard.json'
+  let s = await save(page.request, name, '{"v":1}')
+  for (let i = 2; i <= 22; i++) s = await save(page.request, name, `{"v":${i}}`, s)
+  await page.goto(`${url(name)}?tab=rules`)
+  await page.getByRole('button', { name: '新增规则', exact: true }).click()
+  const source = page.getByRole('combobox', { name: 'beta 复制来源', exact: true })
+  await source.focus()
+  await source.press('ArrowDown')
+  await expect(list).toBeVisible()
+  await page.keyboard.press('End')
+  await expect(page.getByRole('option', { name: 'v1', exact: true })).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(source).toHaveText('v1')
+  await expect(source).toBeFocused()
+  await source.click()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await expect(source).toBeFocused()
+  await page.getByRole('button', { name: '取消', exact: true }).click()
+  await page.getByRole('tab', { name: '配置内容' }).click()
+  const format = page.getByRole('combobox', { name: '配置格式', exact: true })
+  await format.focus()
+  await format.press('y')
+  await expect(format).toHaveText('YAML')
+  await page.getByRole('button', { name: '还原编辑' }).click()
+  await page.getByRole('button', { name: '放弃并继续', exact: true }).click()
+  // Long names must wrap inside the menu without extending the viewport.
+  const longName = 'long-group-' + 'a'.repeat(100)
+  expect(
+    (
+      await page.request.post('/api/admin/namespaces/public/groups', {
+        headers: { Origin: origin },
+        data: { name: longName },
+      })
+    ).ok(),
+  ).toBeTruthy()
+  await page.goto('/configs')
+  await page.setViewportSize({ width: 375, height: 812 })
+  await page.getByRole('combobox', { name: '分组', exact: true }).click()
+  await expect(page.getByRole('option', { name: longName, exact: true })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy()
+  await page.screenshot({ path: '../docs/images/frontend/select-mobile-dark.png', fullPage: true })
+  await page.keyboard.press('Escape')
+  await page.setViewportSize({ width: 812, height: 375 })
+  await page.getByRole('combobox', { name: '分组', exact: true }).click()
+  const bounds = await list.boundingBox()
+  expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(375)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy()
 })

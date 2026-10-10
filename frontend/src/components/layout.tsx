@@ -13,7 +13,6 @@ import {
   ChevronRight,
   LogOut,
   X,
-  ArrowUpRight,
 } from 'lucide-react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
@@ -117,9 +116,6 @@ function Layout() {
             最近检查 {new Date(health.dataUpdatedAt).toLocaleTimeString('zh-CN', { hour12: false })}
           </small>
         )}
-        <div className="sidebar-caption">
-          轻量、专注的配置管理 <ArrowUpRight size={12} aria-hidden="true" />
-        </div>
       </div>
     </>
   )
@@ -201,7 +197,6 @@ function Layout() {
         </main>
         <footer className="workspace-footer">
           <span>ConfHub</span>
-          <span>让每次配置变更都有迹可循</span>
         </footer>
       </div>
     </div>

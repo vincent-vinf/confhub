@@ -1,3 +1,4 @@
+import { Select } from './select'
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowRight, GitCompareArrows, RefreshCw } from 'lucide-react'
@@ -206,21 +207,17 @@ export function ChangeDialog({
         <p className="field-error">该名称已存在，请返回编辑并更换名称。</p>
       )}
       {noChange && <div className="notice info">内容与当前编辑目标一致，无需发布。</div>}
-      {graySave ? (
-        <p className="section-help">
-          比较当前灰度内容与本次编辑；发布后覆盖唯一 beta 配置，不保留修改历史。
-        </p>
-      ) : (
+      {!graySave && (
         <>
           <div className="diff-toolbar">
             <label>
               <GitCompareArrows size={16} aria-hidden="true" />
               对比版本
-              <select
+              <Select
                 aria-label="对比版本"
                 value={comparison}
-                onChange={(e) => {
-                  setComparison(Number(e.target.value))
+                onValueChange={(value) => {
+                  setComparison(Number(value))
                   setChecked(false)
                 }}
                 disabled={busy || reloading}
@@ -239,7 +236,7 @@ export function ChangeDialog({
                       {v.description ? ` · ${v.description}` : ''}
                     </option>
                   ))}
-              </select>
+              </Select>
             </label>
           </div>
           {versions.error && (

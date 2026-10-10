@@ -1,3 +1,4 @@
+import { Select } from '../components/select'
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowRight, GitCompareArrows, History, RotateCcw } from 'lucide-react'
@@ -61,7 +62,6 @@ export function HistoryPanel({
               <History size={18} aria-hidden="true" />
               版本历史 <Badge>{versions.data?.length ?? '…'}</Badge>
             </div>
-            <p className="section-help">仅记录主版本历史；回退生成新全量版本，灰度内容保持不变。</p>
           </div>
         </div>
         <ErrorNotice
@@ -94,7 +94,6 @@ export function HistoryPanel({
                       <div className="history-description">
                         {state.beta.description || '唯一灰度配置'}
                       </div>
-                      <small className="muted">可直接修改 · 保存立即生效 · 无修改历史</small>
                     </td>
                     <td>
                       <Badge>灰度</Badge>
@@ -192,8 +191,7 @@ export function HistoryPanel({
         ) : (
           <Empty title="没有可用历史版本" />
         )}
-        <div className="table-footer">
-          <span>beta 固定置顶 · 主版本倒序 · beta 修改不产生历史</span>
+        <div className="table-footer history-pagination">
           <div className="pagination">
             <Button disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
               上一页
@@ -296,24 +294,32 @@ function HistoryCompare({
       <div className="history-compare-controls">
         <label>
           左侧版本
-          <select value={before} onChange={(e) => setBefore(Number(e.target.value))}>
+          <Select
+            aria-label="左侧版本"
+            value={before}
+            onValueChange={(value) => setBefore(Number(value))}
+          >
             {versions.map((v) => (
               <option key={v.number} value={v.number}>
                 v{v.number}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <ArrowRight size={18} aria-hidden="true" />
         <label>
           右侧版本
-          <select value={after} onChange={(e) => setAfter(Number(e.target.value))}>
+          <Select
+            aria-label="右侧版本"
+            value={after}
+            onValueChange={(value) => setAfter(Number(value))}
+          >
             {versions.map((v) => (
               <option key={v.number} value={v.number}>
                 v{v.number}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
       </div>
       <ErrorNotice

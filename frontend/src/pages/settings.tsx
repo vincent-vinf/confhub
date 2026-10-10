@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { KeyRound, ShieldCheck } from 'lucide-react'
+import { KeyRound } from 'lucide-react'
 import { api } from '../lib/api'
 import { bytes } from '../lib/config'
 import { Button, ErrorNotice } from '../components/ui'
@@ -45,9 +45,7 @@ export function SettingsPage() {
     <>
       <div className="page-heading">
         <div>
-          <span className="eyebrow">ACCOUNT SETTINGS</span>
           <h1>账号设置</h1>
-          <p>管理管理员账户的登录密码。</p>
         </div>
       </div>
       <div className="settings-layout">
@@ -80,12 +78,13 @@ export function SettingsPage() {
               新密码
               <input
                 id="password-new"
+                placeholder="8–72 字节"
                 type="password"
                 autoComplete="new-password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 aria-invalid={!!fieldErrors.new}
-                aria-describedby={fieldErrors.new ? 'error-new' : 'password-help'}
+                aria-describedby={fieldErrors.new ? 'error-new' : undefined}
               />
               {fieldErrors.new && (
                 <small className="field-error" id="error-new">
@@ -93,7 +92,6 @@ export function SettingsPage() {
                 </small>
               )}
             </label>
-            <small id="password-help">8–72 字节。支持粘贴和密码管理器。</small>
             <label>
               再次输入新密码
               <input
@@ -123,12 +121,6 @@ export function SettingsPage() {
           <span className="avatar large">A</span>
           <h2>admin</h2>
           <BadgeLine />
-          <div className="account-note">
-            <ShieldCheck size={22} aria-hidden="true" />
-            <p>
-              修改密码会影响后续登录。已登录的会话在到期前仍可使用；共享管理设备使用后请退出登录。
-            </p>
-          </div>
         </aside>
       </div>
     </>

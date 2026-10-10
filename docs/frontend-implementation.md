@@ -72,3 +72,11 @@ React 19、TypeScript、Vite、TanStack Query、React Router、Radix Dialog 与 
 `python3 sdk/test-integration.py --full` 通过：真实 PostgreSQL 的完整后端 race/vet、Go SDK 与 Python 10 条测试、双实例同名 beta 更新和离线缓存。前端 25 个单测及全部 18 条 Playwright 流程通过，包含置顶编辑、旧主版本复制、多规则共享、删除最后规则后重新复制，以及已有冲突、回退、IP 区间和在线客户端行为。TypeScript、Prettier、mypy、ruff、SDK vet 与 diff 检查通过。MySQL 未运行真实数据库测试，不执行压测。
 
 审查发现规则冲突恢复时 beta 可能已被其他管理员删除。新增浏览器回归先复现失败，再修正为保留编辑草稿并重选来源；元数据操作明确终止。该回归及两个受影响流程通过（共验证 19 条不同浏览器流程），修正后 TypeScript 通过。
+
+## 下拉菜单与界面细节（2026-10-10）
+
+全部页面的选择控件统一使用 Radix Select 和现有主题颜色，覆盖选中、悬停、焦点、禁用及明暗主题。支持键盘导航、输入定位、长选项换行和移动端视口内定位；关闭后恢复触发器焦点，弹窗内 Escape 先关闭菜单。移除页面解释性小字，保留必要的字段标签、状态和操作确认；灰度规则移除 beta 标签，启用开关显示红色、关闭显示绿色。
+
+修订号仅用于内部并发校验和状态更新，配置列表、编辑状态栏及在线客户端均不展示它；配置主版本号和 beta 标识继续展示。
+
+TypeScript、生产构建、Prettier、25 个单测及全部 20 条真实浏览器流程通过。新增流程覆盖展开菜单的明暗主题 WCAG A/AA 扫描、键盘与焦点、弹窗内 Escape、长列表滚动、长选项和手机横屏边界。界面证据：[浅色下拉菜单](images/frontend/select-light.png)、[手机深色下拉菜单](images/frontend/select-mobile-dark.png)。

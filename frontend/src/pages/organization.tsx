@@ -30,7 +30,6 @@ export function OrganizationPage() {
     <>
       <div className="page-heading">
         <div>
-          <span className="eyebrow">WORKSPACE ORGANIZATION</span>
           <h1>命名空间</h1>
         </div>
         <Button
@@ -81,7 +80,7 @@ export function OrganizationPage() {
               ))}
             </div>
           ) : (
-            <Empty title="没有命名空间" description="新建一个命名空间开始组织配置。" />
+            <Empty title="没有命名空间" />
           )}
         </section>
         <section className="panel group-panel">
@@ -128,10 +127,7 @@ export function OrganizationPage() {
               ))}
             </div>
           ) : (
-            <Empty
-              title={active ? '这个命名空间还没有分组' : '先创建一个命名空间'}
-              description={active ? '新建一个分组，再添加配置。' : undefined}
-            />
+            <Empty title={active ? '这个命名空间还没有分组' : '先创建一个命名空间'} />
           )}
         </section>
       </div>
@@ -198,9 +194,7 @@ function OrganizationDialog({
       open
       title={`${removing ? '删除' : '新建'}${kind}`}
       description={
-        removing
-          ? `仅允许删除空${kind}。删除不可撤销，请确认其中的内容已移除。`
-          : `名称用于组织配置，创建后可在配置管理中使用。`
+        removing ? `仅允许删除空${kind}。删除不可撤销，请确认其中的内容已移除。` : undefined
       }
       onClose={onClose}
       busy={busy}

@@ -120,16 +120,21 @@ export function TagInput({
               </div>
             ))}
           </div>
-          <p className="section-help" role="status">
-            {query.isError
-              ? '暂无法读取在线标签，仍可手动填写。'
-              : query.isFetching
-                ? '正在读取在线标签…'
-                : !suggestions.length
-                  ? '暂无匹配的在线标签，仍可手动填写。'
-                  : '来自在线客户端的建议，可自由填写。'}
-            {suggestions.length >= 100 && '最多显示 100 项，请输入前缀缩小范围。'}
-          </p>
+          {(query.isError ||
+            query.isFetching ||
+            !suggestions.length ||
+            suggestions.length >= 100) && (
+            <p className="section-help" role="status">
+              {query.isError
+                ? '暂无法读取在线标签，仍可手动填写。'
+                : query.isFetching
+                  ? '正在读取在线标签…'
+                  : !suggestions.length
+                    ? '暂无匹配的在线标签，仍可手动填写。'
+                    : ''}
+              {suggestions.length >= 100 && '最多显示 100 项，请输入前缀缩小范围。'}
+            </p>
+          )}
         </div>
       )}
     </div>
