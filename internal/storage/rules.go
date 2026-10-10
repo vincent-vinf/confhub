@@ -8,7 +8,7 @@ import (
 )
 
 // SetRules atomically replaces the ordered rule list. A disabled rule still
-// retains its historical target so re-enabling cannot reference pruned content.
+// retains its beta content. Only Save can edit beta, never metadata updates.
 func (s *Store) SetRules(ctx context.Context, k config.Key, id string, revision int64, rules []config.Rule) (config.Mutation, error) {
 	if err := config.ValidateRules(rules); err != nil {
 		return config.Mutation{}, err
@@ -25,21 +25,27 @@ func (s *Store) SetRules(ctx context.Context, k config.Key, id string, revision 
 	if err = checkEdit(state, id, revision); err != nil {
 		return config.Mutation{}, err
 	}
+
+	// Ignore caller-supplied beta content; copy existing betas or initialize from
+	// the current global content within this transaction.
+	next := make([]config.Rule, len(rules))
+	global := state.Versions[state.GlobalVersion]
+	for i, r := range rules {
+		r.Beta = config.Beta{BaseVersion: global.Number, Content: global.Content, Format: global.Format}
+		for _, existing := range state.Rules {
+			if existing.ID == r.ID {
+				r.Beta = existing.Beta
+				break
+			}
+		}
+		next[i] = r
+	}
 	before, _ := json.Marshal(state.Rules)
-	after, _ := json.Marshal(rules)
+	after, _ := json.Marshal(next)
 	if string(before) == string(after) {
 		return config.Mutation{State: state}, nil
 	}
-	for _, r := range rules {
-		if _, ok := state.Versions[r.TargetVersion]; ok {
-			continue
-		}
-		v, err := scanVersion(tx.QueryRowContext(ctx, s.query("SELECT number,content,format,description,action,source_version,created_at FROM config_versions WHERE config_id=? AND number=?"), state.ID, r.TargetVersion))
-		if err != nil {
-			return config.Mutation{}, err
-		}
-		state.Versions[v.Number] = v
-	}
+	rules = next
 	state.Rules = rules
 	state.Revision++
 	if err = s.persistTargets(ctx, tx, state); err != nil {

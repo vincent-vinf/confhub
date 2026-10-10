@@ -130,12 +130,7 @@ func TestManagementRequiresConfirmationAndClientReadsAreAnonymous(t *testing.T) 
 	if res.StatusCode != 200 {
 		t.Fatalf("save: %d", res.StatusCode)
 	}
-	var mutation struct {
-		State struct {
-			ID       string `json:"id"`
-			Revision int64  `json:"revision"`
-		}
-	}
+	var mutation config.Mutation
 	if err := json.NewDecoder(res.Body).Decode(&mutation); err != nil {
 		t.Fatal(err)
 	}
@@ -160,6 +155,66 @@ func TestManagementRequiresConfirmationAndClientReadsAreAnonymous(t *testing.T) 
 	if res = request("GET", path+"/versions", nil, cookie); res.StatusCode != 200 {
 		t.Fatalf("history: %d", res.StatusCode)
 	}
+	rules := []config.RuleInput{{ID: "canary", Enabled: true, Conditions: []config.Condition{{Tag: "env", Operator: "eq", Values: []string{"gray"}}}}}
+	ruleBody := map[string]any{"expected_id": mutation.State.ID, "expected_revision": mutation.State.Revision, "confirmed": true, "rules": rules}
+	res = request("PUT", path+"/rules", ruleBody, cookie)
+	if res.StatusCode != 200 {
+		t.Fatal("create beta rule", res.StatusCode)
+	}
+	if err := json.NewDecoder(res.Body).Decode(&mutation); err != nil {
+		t.Fatal(err)
+	}
+	staleRevision := mutation.State.Revision
+	for _, text := range []string{"beta-one", "beta-two"} {
+		res = request("PUT", path, map[string]any{"expected_id": mutation.State.ID, "expected_revision": mutation.State.Revision, "confirmed": true, "rule_id": "canary", "content": text, "format": "text"}, cookie)
+		if res.StatusCode != 200 {
+			t.Fatal("beta edit", res.StatusCode)
+		}
+		if err := json.NewDecoder(res.Body).Decode(&mutation); err != nil {
+			t.Fatal(err)
+		}
+		if mutation.State.LastVersion != 1 || mutation.State.Rules[0].Beta.BaseVersion != 1 {
+			t.Fatal("beta changed main version sequence")
+		}
+	}
+	if res = request("PUT", path, map[string]any{"expected_id": mutation.State.ID, "expected_revision": staleRevision, "confirmed": true, "rule_id": "canary", "content": "stale", "format": "text"}, cookie); res.StatusCode != 409 {
+		t.Fatal("stale beta edit accepted", res.StatusCode)
+	}
+	if res = request("PUT", path, map[string]any{"expected_id": mutation.State.ID, "expected_revision": mutation.State.Revision, "confirmed": true, "rule_id": "canary", "content": "{invalid", "format": "json"}, cookie); res.StatusCode != 400 {
+		t.Fatal("invalid beta published", res.StatusCode)
+	}
+	target := map[string]any{"expected_id": mutation.State.ID, "expected_revision": mutation.State.Revision, "confirmed": true, "source_version": 1, "rule_id": "canary"}
+	if res = request("POST", path+"/rollback", target, cookie); res.StatusCode != 400 {
+		t.Fatal("gray rollback accepted", res.StatusCode)
+	}
+	if res = request("POST", path+"/promote", target, cookie); res.StatusCode != 400 {
+		t.Fatal("historical gray promotion accepted", res.StatusCode)
+	}
+	delete(target, "source_version")
+	res = request("POST", path+"/promote", target, cookie)
+	if res.StatusCode != 200 {
+		t.Fatal("beta promotion failed", res.StatusCode)
+	}
+	if err := json.NewDecoder(res.Body).Decode(&mutation); err != nil {
+		t.Fatal(err)
+	}
+	if mutation.State.GlobalVersion != 2 || mutation.State.Rules[0].Beta.Content != "beta-two" || !mutation.State.Rules[0].Enabled {
+		t.Fatal("promotion changed rule")
+	}
+	res = request("GET", "/api/client/config?name=service&tags="+url.QueryEscape(`{"env":"gray"}`), nil, nil)
+	var beta config.Effective
+	if err := json.NewDecoder(res.Body).Decode(&beta); err != nil {
+		t.Fatal(err)
+	}
+	if beta.Version != 1 || beta.RuleID != "canary" || beta.Content != "beta-two" {
+		t.Fatalf("HTTP beta: %+v", beta)
+	}
+	ruleBody["expected_revision"] = mutation.State.Revision
+	ruleBody["rules"] = []any{map[string]any{"id": "canary", "enabled": true, "target_version": 1, "conditions": rules[0].Conditions}}
+	if res = request("PUT", path+"/rules", ruleBody, cookie); res.StatusCode != 400 {
+		t.Fatal("legacy version binding accepted", res.StatusCode)
+	}
+
 }
 
 func TestWebSocketPushesPublicationDeletionAndRecreation(t *testing.T) {

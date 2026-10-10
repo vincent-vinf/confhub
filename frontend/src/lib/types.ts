@@ -16,7 +16,7 @@ export type GrayRule = {
   id: string
   name: string
   enabled: boolean
-  target_version: number
+  beta: { base_version: number; content: string; format: Format; description: string }
   conditions: Condition[]
 }
 export type ConfigState = {

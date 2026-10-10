@@ -33,18 +33,18 @@
   "content": "port: 8080\n",
   "format": "yaml",
   "description": "可选说明",
-  "rule_id": "可选；指定时只更新对应灰度目标",
+  "rule_id": "可选；指定时只覆盖对应规则的 beta 内容",
   "confirmed": true
 }
 ```
 
-首次创建修订号为 0。后续保存必须携带 GET 返回的 `id` 与 `revision`。全量和灰度共享配置修订号，任一并发变更都会要求重新比较、确认。前端切换历史 diff 对象不能替换这两个字段。
+首次创建修订号为 0。后续保存必须携带 GET 返回的 `id` 与 `revision`。全量和灰度共享配置修订号，任一并发变更都会要求重新比较、确认。全量编辑切换主历史 diff 对象不能替换这两个字段；灰度仅提供当前内容与编辑内容的 diff。
 
 保存、规则修改、回退、提升和删除要求 `confirmed:true`；这是提交协议，正文 diff 由前端展示。创建命名空间/分组无需正文 diff。删除组织同样要求确认。
 
-保存返回 `{"state":{…},"changed":true,"sequence":42}`。正文与当前目标原文相同返回 `changed:false`、`sequence:0`，不生成版本或日志事件。此时不修改描述或格式；若需要修改声明格式，必须同时修改正文。
+保存返回 `{"state":{…},"changed":true,"sequence":42}`。全量正文和格式均相同返回 `changed:false`、`sequence:0`，不创建版本或事件，也不修改主版本描述；仅改格式可以发布新主版本。灰度正文、格式或描述有变化则原位覆盖 beta、递增修订并写入变更事件；不新增主版本或灰度历史，仅改描述不推送客户端。
 
-`GET CONFIG` 返回身份、修订、全量版本、版本计数、规则列表和当前全量/规则目标的正文。`versions` 按版本号索引。版本正文不可修改。
+`GET CONFIG` 返回身份、修订、全量版本、版本计数、规则列表和当前全量正文与各规则独立的 beta 正文。`versions` 只包含当前全量主版本，按编号索引；主版本正文不可修改。beta 保存在 `rules[].beta`，可覆盖且不引用 `versions`。
 
 声明格式支持 `text/json/yaml/toml/xml/properties/ini`。发布前服务器校验语法，不展开应用占位符或转换正文。名称为 1–128 字节，不能包含斜杠或首尾空白。
 
@@ -52,28 +52,40 @@
 
 | 方法 | 路径 | 正文 / 参数 |
 | --- | --- | --- |
-| GET | `CONFIG/versions` | `before` 为排他版本游标，`limit` 默认 100，最大 100；返回元数据及全量/规则引用关系 |
+| GET | `CONFIG/versions` | `before` 为排他版本游标，`limit` 默认 100，最大 100；仅返回主历史元数据及当前全量标识 |
 | GET | `CONFIG/versions/:version` | 返回包含正文的单份历史版本 |
-| POST | `CONFIG/rollback` | `expected_id/expected_revision/source_version/rule_id?/confirmed` |
-| POST | `CONFIG/promote` | `expected_id/expected_revision/source_version/confirmed`，目标为全量 |
+| POST | `CONFIG/rollback` | `expected_id/expected_revision/source_version/confirmed`，仅全量，禁止 `rule_id` |
+| POST | `CONFIG/promote` | `expected_id/expected_revision/rule_id/confirmed`，读取该规则当前 beta 发布为全量，禁止 `source_version` |
 | PUT | `CONFIG/rules` | `expected_id/expected_revision/confirmed/rules`，原子替换整个有序列表 |
 | POST | `CONFIG/simulate` | `{"tags":{"env":"gray"}}`，返回命中规则与有效配置 |
 
-规则结构：
+规则列表更新的输入结构（仅元数据，不接受 `target_version` 或 `beta`）：
 
 ```json
 {
   "id": "客户端生成的唯一规则 ID，最多 36 字节",
   "name": "规则名称",
   "enabled": true,
-  "target_version": 3,
   "conditions": [{"tag":"env","operator":"in","values":["gray","staging"]}]
 }
 ```
 
-列表先后顺序就是匹配顺序；规则内部使用 AND。`eq` 只接受一个值，`in` 接受值集合；缺失标签不匹配。规则最多 100 条，每条最多 32 个条件。停用规则继续保留目标版本引用。新增、排序、停用和删除都通过替换列表完成。删除一条规则后继续匹配后面的规则。
+列表先后顺序就是匹配顺序；规则内部使用 AND。`eq` 只接受一个值，`in` 接受值集合；缺失标签不匹配。规则最多 100 条，每条最多 32 个条件。停用规则保留其临时内容，重新开启继续使用。新增、排序、停用和删除都通过替换列表完成。删除一条规则后继续匹配后面的规则。
 
-回退复制历史正文生成新版本，自动描述来源；灰度回退只移动指定规则目标。提升灰度内容为全量也生成新版本。与当前目标正文完全相同的操作不产生重复版本。全量修改不改变固定灰度目标。
+创建规则时服务端在事务内复制当前全量正文及格式，设置不可更改的 `base_version`。读取规则时额外返回：
+
+```json
+"beta": {
+  "base_version": 4,
+  "content": "port: 8081\n",
+  "format": "yaml",
+  "description": "灰度说明"
+}
+```
+
+名称显示为 V4-beta；主全量后续更新和 beta 覆盖均不改变该名称。不同规则内容独立，删除规则清除 beta；beta 不占主历史配额，清理来源主历史不影响 beta。
+
+回退仅复制主历史正文生成下一个主版本，自动描述来源。灰度转全量通过 `rule_id` 读取当前 beta，生成下一个主版本，保留规则和 beta；全量编辑不改变任何 beta。转全量主版本的 `source_version` 记录 beta 的创建来源编号，应显示为 Vn-beta，而非宣称内容来自对应主历史快照。正文与格式均相同时不产生重复主版本。
 
 ## 客户端读取
 
@@ -97,7 +109,7 @@
 }
 ```
 
-不存在时 HTTP 404 返回 `deleted:true`、业务键与读取水位。身份和流序号用于抵御晚到结果；灰度版本号可能下降，同名重建版本号从 1 开始。HTTP/推送可在正常传播窗口内暂时读取旧缓存。
+不存在时 HTTP 404 返回 `deleted:true`、业务键与读取水位。身份和流序号用于抵御晚到结果；命中灰度时 `version` 是 beta 创建来源的主版本号，`rule_id` 非空，可显示为 V{version}-beta；它不是 beta 修改计数。同名 beta 原位修改时 version 不变，灰度切换时编号也可能下降；同名配置重建从版本 1 开始。HTTP/推送可在正常传播窗口内暂时读取旧缓存。
 
 ## WebSocket
 
@@ -107,7 +119,7 @@
 {"op":"subscribe","key":{"namespace":"public","group":"DEFAULT_GROUP","name":"service"}}
 ```
 
-注册订阅后立即推送当前有效状态；不存在也明确推送删除状态。消息直接使用上述有效状态结构，没有额外 envelope。后续只有有效版本或存在状态改变时推送完整正文。连续变更允许合并为最终状态，每个配置最多保留一个待发送快照。
+注册订阅后立即推送当前有效状态；不存在也明确推送删除状态。消息直接使用上述有效状态结构，没有额外 envelope。后续配置身份、有效版本、命中规则、正文、格式或存在状态改变时推送完整正文；配置级修订变化但有效内容未受影响时不推送。连续变更允许合并为最终状态，每个配置最多保留一个待发送快照。
 
 ```json
 {"op":"unsubscribe","key":{"namespace":"public","group":"DEFAULT_GROUP","name":"service"}}
@@ -124,3 +136,7 @@
 - 管理端 400：校验、缺少确认、组织非空；401：认证失败；403：来源不符；404：不存在；409：乐观锁冲突；500：内部故障。
 - 客户端同步不可用返回 503。连续数据库同步失败默认 2 秒后关闭已有会话，恢复时重建缓存和消费水位。
 - React 静态目录通过 flag/env 提供；页面路由可回退到 index.html，配置详情页中的 `.json`/`.yaml` 等名称同样支持直接访问与刷新。未知 API 和缺失资源返回 404。应用镜像在构建阶段生成并复制 React 页面，由 Go 直接提供。
+
+## 数据库模型边界
+
+当前 schema 2 不兼容旧 schema 1 配置数据。启动和 migrate 拒绝旧 schema，要求使用新的空数据库或由使用者重建。旧数据不会由应用自动删除或转换。

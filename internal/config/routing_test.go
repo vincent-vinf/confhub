@@ -10,8 +10,8 @@ func TestGrayRulesUseFirstMatchAndFallThroughWhenDisabled(t *testing.T) {
 	state := config.State{ID: "cfg", Revision: 7, GlobalVersion: 3, Versions: map[int64]config.Version{
 		1: {Number: 1, Content: "old", Format: "text"}, 2: {Number: 2, Content: "canary", Format: "text"}, 3: {Number: 3, Content: "global", Format: "text"},
 	}, Rules: []config.Rule{
-		{ID: "specific", Enabled: true, TargetVersion: 1, Conditions: []config.Condition{{Tag: "region", Operator: "eq", Values: []string{"east"}}, {Tag: "sys.hostname", Operator: "in", Values: []string{"node-a", "node-b"}}}},
-		{ID: "region", Enabled: true, TargetVersion: 2, Conditions: []config.Condition{{Tag: "region", Operator: "eq", Values: []string{"east"}}}},
+		{ID: "specific", Enabled: true, Beta: config.Beta{BaseVersion: 1, Content: "old", Format: "text"}, Conditions: []config.Condition{{Tag: "region", Operator: "eq", Values: []string{"east"}}, {Tag: "sys.hostname", Operator: "in", Values: []string{"node-a", "node-b"}}}},
+		{ID: "region", Enabled: true, Beta: config.Beta{BaseVersion: 2, Content: "canary", Format: "text"}, Conditions: []config.Condition{{Tag: "region", Operator: "eq", Values: []string{"east"}}}},
 	}}
 	got := config.Resolve(&state, map[string]string{"region": "east", "sys.hostname": "node-a"})
 	if got.Version != 1 || got.RuleID != "specific" {
@@ -30,9 +30,9 @@ func TestGrayRulesUseFirstMatchAndFallThroughWhenDisabled(t *testing.T) {
 
 func TestGrayRuleValidationRejectsAmbiguousConditions(t *testing.T) {
 	for _, r := range []config.Rule{
-		{ID: "r", TargetVersion: 1},
-		{ID: "r", TargetVersion: 1, Conditions: []config.Condition{{Tag: "env", Operator: "eq", Values: []string{"a", "b"}}}},
-		{ID: "r", TargetVersion: 1, Conditions: []config.Condition{{Tag: "env", Operator: "regex", Values: []string{".*"}}}},
+		{ID: "r"},
+		{ID: "r", Conditions: []config.Condition{{Tag: "env", Operator: "eq", Values: []string{"a", "b"}}}},
+		{ID: "r", Conditions: []config.Condition{{Tag: "env", Operator: "regex", Values: []string{".*"}}}},
 	} {
 		if err := config.ValidateRules([]config.Rule{r}); err == nil {
 			t.Fatalf("invalid rule accepted: %+v", r)

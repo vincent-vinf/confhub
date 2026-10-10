@@ -5,6 +5,7 @@ import "fmt"
 // Resolve evaluates the same ordered rules for client reads and admin simulation.
 func Resolve(state *State, tags map[string]string) Effective {
 	target := state.GlobalVersion
+	v := state.Versions[target]
 	ruleID := ""
 	for _, rule := range state.Rules {
 		if !rule.Enabled {
@@ -28,12 +29,12 @@ func Resolve(state *State, tags map[string]string) Effective {
 			}
 		}
 		if match {
-			target = rule.TargetVersion
+			target = rule.Beta.BaseVersion
+			v = Version{Content: rule.Beta.Content, Format: rule.Beta.Format}
 			ruleID = rule.ID
 			break
 		}
 	}
-	v := state.Versions[target]
 	return Effective{Sequence: state.Sequence, ID: state.ID, Key: state.Key, Revision: state.Revision, Version: target, Content: v.Content, Format: v.Format, RuleID: ruleID}
 }
 func ValidateRules(rules []Rule) error {
@@ -42,8 +43,8 @@ func ValidateRules(rules []Rule) error {
 	}
 	ids := map[string]bool{}
 	for _, r := range rules {
-		if r.ID == "" || len(r.ID) > 36 || ids[r.ID] || r.TargetVersion < 1 || len(r.Conditions) == 0 || len(r.Conditions) > 32 {
-			return fmt.Errorf("%w: invalid rule identity, version or conditions", ErrInvalid)
+		if r.ID == "" || len(r.ID) > 36 || ids[r.ID] || len(r.Conditions) == 0 || len(r.Conditions) > 32 {
+			return fmt.Errorf("%w: invalid rule identity or conditions", ErrInvalid)
 		}
 		ids[r.ID] = true
 		if len(r.Name) > 128 {

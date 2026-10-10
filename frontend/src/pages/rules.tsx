@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   ArrowDown,
   ArrowUp,
@@ -11,8 +11,8 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
-import { api, allVersions, ApiError, configQueryKey } from '../lib/api'
-import { baselineOf, ruleError, ruleId } from '../lib/config'
+import { api, ApiError, configQueryKey } from '../lib/api'
+import { baselineOf, ruleError, ruleId, targetVersion } from '../lib/config'
 import type { Condition, ConfigKey, ConfigState, Effective, GrayRule } from '../lib/types'
 import { ChangeDialog, type ChangeAction } from '../components/change-dialog'
 import { Badge, Button, Confirmation, Empty, ErrorNotice, Loading, Modal } from '../components/ui'
@@ -31,10 +31,6 @@ export function RulesPanel({
 }) {
   const toast = useToast()
   const client = useQueryClient()
-  const versions = useQuery({
-    queryKey: ['versions', configKey],
-    queryFn: ({ signal }) => allVersions(configKey, signal),
-  })
   const [editing, setEditing] = useState<GrayRule>()
   const [initialEdit, setInitialEdit] = useState('')
   const [pending, setPending] = useState<{ title: string; rules: GrayRule[] }>()
@@ -42,7 +38,6 @@ export function RulesPanel({
   const [error, setError] = useState<unknown>()
   const [busy, setBusy] = useState(false)
   const [action, setAction] = useState<ChangeAction>()
-  const [promoting, setPromoting] = useState<string>()
   usePending('正在更新灰度规则', busy)
   useDirty(
     '灰度规则的未保存编辑',
@@ -57,7 +52,12 @@ export function RulesPanel({
           id: ruleId(),
           name: '',
           enabled: true,
-          target_version: state.global_version,
+          beta: {
+            base_version: state.global_version,
+            content: '',
+            format: state.versions[state.global_version].format,
+            description: '',
+          },
           conditions: [{ tag: '', operator: 'eq' as const, values: [''] }],
         }
     setEditing(value)
@@ -112,6 +112,19 @@ export function RulesPanel({
         setError('原配置已删除或重建，请保留当前规则草稿并重新打开配置。')
         return
       }
+      // New rules copy the latest global content; existing rules retain their
+      // current beta even when this metadata draft was opened earlier.
+      const refreshBeta = (rule: GrayRule): GrayRule => ({
+        ...rule,
+        beta: latest.rules.find((r) => r.id === rule.id)?.beta ?? {
+          base_version: latest.global_version,
+          content: '',
+          format: latest.versions[latest.global_version].format,
+          description: '',
+        },
+      })
+      setPending((value) => (value ? { ...value, rules: value.rules.map(refreshBeta) } : value))
+      setEditing((value) => (value ? refreshBeta(value) : value))
       onStateChanged(latest)
       reviewBaseline.current = latest
       setChecked(false)
@@ -122,17 +135,8 @@ export function RulesPanel({
       setBusy(false)
     }
   }
-  async function promote(rule: GrayRule) {
-    setPromoting(rule.id)
-    setError(undefined)
-    try {
-      const source = await api.version(configKey, rule.target_version)
-      setAction({ kind: 'promote', source })
-    } catch (e) {
-      setError(e)
-    } finally {
-      setPromoting(undefined)
-    }
+  function promote(rule: GrayRule) {
+    setAction({ kind: 'promote', source: targetVersion(state, rule.id), ruleId: rule.id })
   }
   function move(index: number, offset: number) {
     const next = [...state.rules]
@@ -195,7 +199,7 @@ export function RulesPanel({
                     <Badge tone={rule.enabled ? 'success' : 'neutral'}>
                       {rule.enabled ? '启用' : '停用'}
                     </Badge>
-                    <Badge>固定 v{rule.target_version}</Badge>
+                    <Badge>v{rule.beta.base_version}-beta</Badge>
                   </div>
                   <RuleConditions rule={rule} />
                   <div className="rule-content-actions">
@@ -203,11 +207,7 @@ export function RulesPanel({
                       <Pencil size={14} aria-hidden="true" />
                       编辑此规则内容
                     </Button>
-                    <Button
-                      variant="ghost"
-                      busy={promoting === rule.id}
-                      onClick={() => promote(rule)}
-                    >
+                    <Button variant="ghost" onClick={() => promote(rule)}>
                       转为全量
                     </Button>
                   </div>
@@ -256,7 +256,7 @@ export function RulesPanel({
         ) : (
           <Empty
             title="当前使用全量发布"
-            description="需要定向发布时，添加标签条件并绑定一个固定版本。"
+            description="添加标签条件后，从当前全量创建独立灰度内容。"
           />
         )}
       </section>
@@ -277,15 +277,8 @@ export function RulesPanel({
             </>
           }
         >
-          <RuleForm
-            rule={editing}
-            onChange={setEditing}
-            versions={versions.data?.map((v) => v.number) ?? [state.global_version]}
-          />
-          <ErrorNotice
-            error={error || versions.error}
-            onRetry={versions.error ? () => versions.refetch() : undefined}
-          />
+          <RuleForm rule={editing} onChange={setEditing} />
+          <ErrorNotice error={error} />
         </Modal>
       )}
       {pending && (
@@ -319,7 +312,7 @@ export function RulesPanel({
         >
           <div className="notice info">
             全量仍为 v{state.global_version}
-            。规则停用或移除后，会继续匹配后面的规则，全部未命中才使用全量。
+            。规则停用保留临时内容，删除清除临时内容。停用或移除后继续匹配后面的规则，全部未命中才使用全量。
           </div>
           <div className="rule-comparison">
             <div>
@@ -381,7 +374,7 @@ function RuleSummary({ rules }: { rules: GrayRule[] }) {
         <li key={rule.id}>
           <div>
             <strong>{rule.name || '未命名规则'}</strong>
-            <Badge>v{rule.target_version}</Badge>
+            <Badge>v{rule.beta.base_version}-beta</Badge>
             <Badge tone={rule.enabled ? 'success' : 'neutral'}>
               {rule.enabled ? '启用' : '停用'}
             </Badge>
@@ -394,15 +387,7 @@ function RuleSummary({ rules }: { rules: GrayRule[] }) {
     <p className="muted">没有灰度规则，全部使用全量版本。</p>
   )
 }
-function RuleForm({
-  rule,
-  onChange,
-  versions,
-}: {
-  rule: GrayRule
-  onChange: (rule: GrayRule) => void
-  versions: number[]
-}) {
+function RuleForm({ rule, onChange }: { rule: GrayRule; onChange: (rule: GrayRule) => void }) {
   const updateCondition = (index: number, next: Condition) =>
     onChange({ ...rule, conditions: rule.conditions.map((c, i) => (i === index ? next : c)) })
   return (
@@ -416,23 +401,14 @@ function RuleForm({
             onChange={(e) => onChange({ ...rule, name: e.target.value })}
           />
         </label>
-        <label>
-          固定版本
-          <select
-            aria-label="固定版本"
-            value={rule.target_version}
-            onChange={(e) => onChange({ ...rule, target_version: Number(e.target.value) })}
-          >
-            {[...new Set([rule.target_version, ...versions])]
-              .sort((a, b) => b - a)
-              .map((v) => (
-                <option key={v} value={v}>
-                  v{v}
-                </option>
-              ))}
-          </select>
-        </label>
+        <div>
+          <span className="muted">灰度临时版本</span>
+          <p className="mono">v{rule.beta.base_version}-beta</p>
+        </div>
       </div>
+      <p className="section-help">
+        新规则复制当前全量内容；后续在配置内容页编辑并覆盖，不保留灰度历史。关闭保留内容，删除会清除内容。
+      </p>
       <label className="check-label">
         <input
           type="checkbox"
@@ -662,7 +638,10 @@ function Simulation({ configKey, state }: { configKey: ConfigKey; state: ConfigS
           {result ? (
             <>
               <span className="eyebrow">EFFECTIVE VERSION</span>
-              <strong className="simulation-version">v{result.version}</strong>
+              <strong className="simulation-version">
+                v{result.version}
+                {result.rule_id ? '-beta' : ''}
+              </strong>
               <Badge tone={result.rule_id ? 'warning' : 'success'}>
                 {result.rule_id ? '命中灰度规则' : '使用全量配置'}
               </Badge>

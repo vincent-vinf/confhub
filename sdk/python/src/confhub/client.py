@@ -253,10 +253,20 @@ class AsyncClient:
             await ws.close()
 
     def _enqueue(self, sub: _Subscription, value: Snapshot) -> None:
-        if sub.last is not None and (sub.last.id, sub.last.version, sub.last.deleted) == (
+        if sub.last is not None and (
+            sub.last.id,
+            sub.last.version,
+            sub.last.deleted,
+            sub.last.rule_id,
+            sub.last.content,
+            sub.last.format,
+        ) == (
             value.id,
             value.version,
             value.deleted,
+            value.rule_id,
+            value.content,
+            value.format,
         ):
             return
         sub.last = value

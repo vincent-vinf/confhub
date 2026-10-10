@@ -2183,10 +2183,10 @@ tbody tr:hover {
     font-size: 12px;
   }
   .diff-content .cm-merge-a::before {
-    content: '对比版本';
+    content: attr(data-diff-title);
   }
   .diff-content .cm-merge-b::before {
-    content: '待发布 / 选中版本';
+    content: attr(data-diff-title);
   }
   .diff-head {
     display: none !important;

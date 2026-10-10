@@ -163,12 +163,16 @@ export function ConfigDiff({
   beforeFormat,
   afterFormat,
   onReady,
+  beforeTitle = '对比版本',
+  afterTitle = '待发布 / 选中版本',
 }: {
   before: string
   after: string
   beforeFormat: Format
   afterFormat: Format
   onReady?: (ready: boolean) => void
+  beforeTitle?: string
+  afterTitle?: string
 }) {
   const container = useRef<HTMLDivElement>(null)
   const { theme } = useTheme()
@@ -207,6 +211,8 @@ export function ConfigDiff({
           gutter: true,
           collapseUnchanged: { margin: 3, minSize: 8 },
         })
+        merge.dom.querySelector('.cm-merge-a')?.setAttribute('data-diff-title', beforeTitle)
+        merge.dom.querySelector('.cm-merge-b')?.setAttribute('data-diff-title', afterTitle)
         setLoading(false)
         onReady?.(true)
       })
@@ -221,7 +227,7 @@ export function ConfigDiff({
       active = false
       merge?.destroy()
     }
-  }, [before, after, beforeFormat, afterFormat, theme, attempt, onReady])
+  }, [before, after, beforeFormat, afterFormat, theme, attempt, onReady, beforeTitle, afterTitle])
   return (
     <div className="diff-frame">
       {loading && <Loading label="正在准备版本差异…" />}
@@ -232,8 +238,8 @@ export function ConfigDiff({
         </div>
       )}
       <div className="diff-head">
-        <span>对比版本</span>
-        <span>待发布 / 选中版本</span>
+        <span>{beforeTitle}</span>
+        <span>{afterTitle}</span>
       </div>
       <div ref={container} className="diff-content" data-testid="config-diff" />
     </div>

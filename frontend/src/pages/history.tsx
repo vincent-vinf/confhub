@@ -29,7 +29,6 @@ export function HistoryPanel({
   const [action, setAction] = useState<ChangeAction>()
   const [loading, setLoading] = useState<number>()
   const [error, setError] = useState<unknown>()
-  const [targetRule, setTargetRule] = useState('global')
   const viewed = useQuery({
     queryKey: ['version', configKey, viewing],
     queryFn: ({ signal }) => api.version(configKey, viewing!, signal),
@@ -43,7 +42,6 @@ export function HistoryPanel({
       setAction({
         kind: 'rollback',
         source,
-        ruleId: targetRule === 'global' ? undefined : targetRule,
       })
     } catch (e) {
       setError(e)
@@ -61,23 +59,8 @@ export function HistoryPanel({
               <History size={18} aria-hidden="true" />
               版本历史 <Badge>{versions.data?.length ?? '…'}</Badge>
             </div>
-            <p className="section-help">历史不可修改；回退会复制内容生成新版本。</p>
+            <p className="section-help">仅记录主版本历史；回退生成新全量版本，灰度内容保持不变。</p>
           </div>
-          <label>
-            回退目标
-            <select
-              aria-label="回退目标"
-              value={targetRule}
-              onChange={(e) => setTargetRule(e.target.value)}
-            >
-              <option value="global">全量配置</option>
-              {state.rules.map((rule) => (
-                <option key={rule.id} value={rule.id}>
-                  {rule.name || rule.id}
-                </option>
-              ))}
-            </select>
-          </label>
         </div>
         <ErrorNotice
           error={error || versions.error}
@@ -114,23 +97,15 @@ export function HistoryPanel({
                       </div>
                       <small className="muted">
                         {actionNames[version.action] ?? version.action}
-                        {version.source_version ? ` · 来源 v${version.source_version}` : ''}
+                        {version.source_version
+                          ? ` · 来源 v${version.source_version}${version.action === 'promote' ? '-beta' : ''}`
+                          : ''}
                       </small>
                     </td>
                     <td>
                       <div className="reference-tags">
-                        {version.references?.length ? (
-                          version.references.map((reference) => (
-                            <Badge
-                              key={reference}
-                              tone={reference === 'global' ? 'success' : 'neutral'}
-                            >
-                              {reference === 'global'
-                                ? '全量'
-                                : state.rules.find((rule) => rule.id === reference)?.name ||
-                                  reference}
-                            </Badge>
-                          ))
+                        {version.references?.includes('global') ? (
+                          <Badge tone="success">全量</Badge>
                         ) : (
                           <span className="muted">—</span>
                         )}
@@ -178,7 +153,7 @@ export function HistoryPanel({
           <Empty title="没有可用历史版本" />
         )}
         <div className="table-footer">
-          <span>按创建版本倒序 · 被引用的旧版本会继续保留</span>
+          <span>按主版本倒序 · 灰度临时内容不进入历史</span>
           <div className="pagination">
             <Button disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
               上一页

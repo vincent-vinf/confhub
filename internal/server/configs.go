@@ -118,15 +118,25 @@ func (s *Server) configRoutes(a *gin.RouterGroup) {
 	a.PUT(base+"/:name/rules", func(c *gin.Context) {
 		var b struct {
 			confirmedTarget
-			Rules []config.Rule `json:"rules"`
+			Rules []config.RuleInput `json:"rules"`
 		}
-		if !bind(c, &b) || !confirm(c, b.Confirmed) {
+		decoder := json.NewDecoder(c.Request.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&b); err != nil {
+			c.AbortWithStatusJSON(400, gin.H{"error": "rules accept metadata only; edit beta content through configuration save"})
+			return
+		}
+		if !confirm(c, b.Confirmed) {
 			return
 		}
 		if b.Rules == nil {
-			b.Rules = []config.Rule{}
+			b.Rules = []config.RuleInput{}
 		}
-		m, err := s.store.SetRules(c.Request.Context(), pathKey(c), b.ExpectedID, b.ExpectedRevision, b.Rules)
+		rules := make([]config.Rule, len(b.Rules))
+		for i, r := range b.Rules {
+			rules[i] = r.Rule()
+		}
+		m, err := s.store.SetRules(c.Request.Context(), pathKey(c), b.ExpectedID, b.ExpectedRevision, rules)
 		s.mutated(c, "rules", m, err)
 	})
 	a.POST(base+"/:name/simulate", func(c *gin.Context) {
@@ -178,10 +188,6 @@ func (s *Server) configRoutes(a *gin.RouterGroup) {
 				RuleID string `json:"rule_id"`
 			}
 			if !bind(c, &b) || !confirm(c, b.Confirmed) {
-				return
-			}
-			if action == "promote" && b.RuleID != "" {
-				s.respond(c, nil, fmt.Errorf("%w: promotion targets global publication", config.ErrInvalid))
 				return
 			}
 			m, err := s.store.CopyVersion(c.Request.Context(), pathKey(c), b.ExpectedID, b.ExpectedRevision, b.Source, b.RuleID, action == "rollback")

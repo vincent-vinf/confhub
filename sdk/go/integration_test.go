@@ -75,11 +75,18 @@ func TestRealServerIntegration(t *testing.T) {
 	first := next(1, false)
 	state = request("PUT", path, map[string]any{"expected_id": state["id"], "expected_revision": state["revision"], "content": "second\n", "format": "text", "confirmed": true})["state"].(map[string]any)
 	next(2, false)
-	state = request("PUT", path+"/rules", map[string]any{"expected_id": state["id"], "expected_revision": state["revision"], "confirmed": true, "rules": []any{map[string]any{"id": "gray", "name": "SDK", "enabled": true, "target_version": 1, "conditions": []any{map[string]any{"tag": "env", "operator": "eq", "values": []string{"sdk"}}}}}})["state"].(map[string]any)
-	gray := next(1, false)
+	state = request("PUT", path+"/rules", map[string]any{"expected_id": state["id"], "expected_revision": state["revision"], "confirmed": true, "rules": []any{map[string]any{"id": "gray", "name": "SDK", "enabled": true, "conditions": []any{map[string]any{"tag": "env", "operator": "eq", "values": []string{"sdk"}}}}}})["state"].(map[string]any)
+	gray := next(2, false)
 	if gray.RuleID != "gray" {
 		t.Fatal("gray rule wasn't selected")
 	}
+	for _, content := range []string{"beta one", "beta two"} {
+		state = request("PUT", path, map[string]any{"expected_id": state["id"], "expected_revision": state["revision"], "rule_id": "gray", "content": content, "format": "text", "confirmed": true})["state"].(map[string]any)
+		if value := next(2, false); value.Content != content || value.RuleID != "gray" {
+			t.Fatal("beta replacement not observed", value)
+		}
+	}
+
 	request("DELETE", path, map[string]any{"expected_id": state["id"], "expected_revision": state["revision"], "confirmed": true})
 	next(0, true)
 	if _, err = client.Get(context.Background(), key); !errors.Is(err, confhub.ErrNotFound) {

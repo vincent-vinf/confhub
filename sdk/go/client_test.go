@@ -127,32 +127,38 @@ func TestWatchAcceptsLowerVersionsDeletesAndRecreates(t *testing.T) {
 	if err = client.Subscribe(context.Background(), key, func(ctx context.Context, value confhub.Snapshot) { received <- value }); err != nil {
 		t.Fatal(err)
 	}
-	next := func(version int64, id string, deleted bool) {
+	next := func(version int64, id string, deleted bool) confhub.Snapshot {
 		t.Helper()
 		select {
 		case value := <-received:
 			if value.Version != version || value.ID != id || value.Deleted != deleted {
 				t.Fatalf("unexpected callback %#v", value)
 			}
+			return value
 		case <-time.After(3 * time.Second):
 			t.Fatal("callback timeout")
 		}
+		return confhub.Snapshot{}
 	}
 	next(5, "first", false)
 	<-subscribed
-	updates <- confhub.Snapshot{Key: key, Sequence: 2, ID: "first", Revision: 2, Version: 2, Content: "gray two", Format: "text"}
+	updates <- confhub.Snapshot{Key: key, Sequence: 2, ID: "first", Revision: 2, Version: 2, Content: "gray two", Format: "text", RuleID: "gray"}
 	next(2, "first", false)
 	// An older HTTP response must not roll the live state back.
 	value, err := client.Get(context.Background(), key)
 	if err != nil || value.Version != 2 {
 		t.Fatal("late HTTP response overwrote push", value, err)
 	}
-	updates <- confhub.Snapshot{Key: key, Sequence: 3, ID: "first", Revision: 3, Deleted: true}
+	updates <- confhub.Snapshot{Key: key, Sequence: 3, ID: "first", Revision: 3, Version: 2, Content: "beta replaced", Format: "text", RuleID: "gray"}
+	if got := next(2, "first", false); got.Content != "beta replaced" {
+		t.Fatal("same-version content was not delivered", got)
+	}
+	updates <- confhub.Snapshot{Key: key, Sequence: 4, ID: "first", Revision: 4, Deleted: true}
 	next(0, "first", true)
 	if _, err = client.Get(context.Background(), key); !errors.Is(err, confhub.ErrNotFound) {
 		t.Fatal("old HTTP result resurrected deleted config", err)
 	}
-	updates <- confhub.Snapshot{Key: key, Sequence: 4, ID: "rebuilt", Revision: 1, Version: 1, Content: "rebuilt", Format: "text"}
+	updates <- confhub.Snapshot{Key: key, Sequence: 5, ID: "rebuilt", Revision: 1, Version: 1, Content: "rebuilt", Format: "text"}
 	next(1, "rebuilt", false)
 	if err = client.Unsubscribe(key); err != nil {
 		t.Fatal(err)

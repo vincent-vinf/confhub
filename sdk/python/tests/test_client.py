@@ -144,7 +144,9 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
             first = await asyncio.wait_for(received.get(), 2)
             self.assertEqual(first.version, 3)
             await asyncio.wait_for(self.subscribed.wait(), 2)
-            self.value = dict(self.value, sequence=43, revision=8, version=1, content="gray one")
+            self.value = dict(
+                self.value, sequence=43, revision=8, version=1, content="gray one", rule_id="gray"
+            )
             await self.messages.put(self.value)
             lower = await asyncio.wait_for(received.get(), 2)
             self.assertEqual((lower.version, lower.content), (1, "gray one"))
@@ -156,12 +158,20 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
                     self.fail("did not recreate subscription")
                 await asyncio.sleep(0.01)
             self.assertTrue(received.empty(), "duplicate or obsolete callback")
-            deleted = dict(self.value, sequence=44, revision=9, deleted=True, content="", version=0)
+            self.value = dict(
+                self.value, sequence=44, revision=9, content="beta replaced", rule_id="gray"
+            )
+            await self.messages.put(self.value)
+            beta = await asyncio.wait_for(received.get(), 2)
+            self.assertEqual((beta.version, beta.content), (1, "beta replaced"))
+            deleted = dict(
+                self.value, sequence=45, revision=10, deleted=True, content="", version=0
+            )
             await self.messages.put(deleted)
             self.assertTrue((await asyncio.wait_for(received.get(), 2)).deleted)
             with self.assertRaises(NotFound):
                 await client.get(self.key)  # stale live HTTP result cannot resurrect deletion
-            rebuilt = dict(self.value, sequence=45, revision=1, id="rebuilt", version=1)
+            rebuilt = dict(self.value, sequence=46, revision=1, id="rebuilt", version=1)
             await self.messages.put(rebuilt)
             self.assertEqual((await asyncio.wait_for(received.get(), 2)).id, "rebuilt")
             await client.unsubscribe(self.key)

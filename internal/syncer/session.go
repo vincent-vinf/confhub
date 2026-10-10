@@ -112,7 +112,7 @@ func (s *Session) offer(k config.Key, generation uint64, state *config.State, se
 		value = config.Resolve(state, s.tags)
 	}
 	s.last[k] = value
-	if exists && previous.ID == value.ID && previous.Version == value.Version && previous.Deleted == value.Deleted {
+	if exists && previous.ID == value.ID && previous.Version == value.Version && previous.Deleted == value.Deleted && previous.RuleID == value.RuleID && previous.Content == value.Content && previous.Format == value.Format {
 		if _, ok := s.pending[k]; ok {
 			s.pending[k] = value
 		}

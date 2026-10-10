@@ -2,7 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowRight, GitCompareArrows, RefreshCw } from 'lucide-react'
 import { api, allVersions, ApiError, configQueryKey } from '../lib/api'
-import { baselineOf, editPayload, publicationImpact, targetVersion } from '../lib/config'
+import {
+  baselineOf,
+  editPayload,
+  publicationImpact,
+  targetVersion,
+  type EditorTarget,
+} from '../lib/config'
 import type { ConfigKey, ConfigState, Draft, Version } from '../lib/types'
 import { ConfigDiff } from './editor'
 import { Badge, Button, Confirmation, ErrorNotice, Loading, Modal } from './ui'
@@ -10,7 +16,8 @@ import { useToast, usePending } from './providers'
 
 export type ChangeAction =
   | { kind: 'save'; draft: Draft }
-  | { kind: 'rollback' | 'promote'; source: Version; ruleId?: string }
+  | { kind: 'rollback'; source: Version }
+  | { kind: 'promote'; source: EditorTarget; ruleId: string }
 export function ChangeDialog({
   configKey,
   baseline,
@@ -30,8 +37,14 @@ export function ChangeDialog({
   const toast = useToast()
   const [current, setCurrent] = useState(baseline)
   const originalID = useRef(baseline?.id)
-  const ruleId = action.kind === 'save' ? action.draft.ruleId : action.ruleId
-  const currentTarget = current ? targetVersion(current, ruleId) : undefined
+  const ruleId =
+    action.kind === 'save'
+      ? action.draft.ruleId
+      : action.kind === 'promote'
+        ? action.ruleId
+        : undefined
+  const graySave = action.kind === 'save' && !!ruleId
+  const currentTarget = current ? targetVersion(current, graySave ? ruleId : undefined) : undefined
   const [comparison, setComparison] = useState(currentTarget?.number ?? 0)
   const [checked, setChecked] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -43,20 +56,27 @@ export function ChangeDialog({
   const versions = useQuery({
     queryKey: ['versions', configKey],
     queryFn: ({ signal }) => allVersions(configKey, signal),
-    enabled: !!current,
+    enabled: !!current && !graySave,
   })
   const known = comparison ? current?.versions[comparison] : undefined
   const other = useQuery({
     queryKey: ['version', configKey, comparison],
     queryFn: ({ signal }) => api.version(configKey, comparison, signal),
-    enabled: comparison > 0 && !known,
+    enabled: !graySave && comparison > 0 && !known,
   })
-  const before =
-    comparison === 0
+  const before = graySave
+    ? currentTarget
+    : comparison === 0
       ? { content: '', format: action.kind === 'save' ? action.draft.format : action.source.format }
       : (known ?? other.data)
-  const after = action.kind === 'save' ? action.draft : action.source
-  const noChange = !!currentTarget && currentTarget.content === after.content
+  const promotionSource =
+    action.kind === 'promote' && current ? targetVersion(current, action.ruleId) : undefined
+  const after = action.kind === 'save' ? action.draft : (promotionSource ?? action.source)
+  const noChange =
+    !!currentTarget &&
+    currentTarget.content === after.content &&
+    currentTarget.format === after.format &&
+    (!graySave || currentTarget.description === after.description)
   const isConflict = error instanceof ApiError && error.status === 409
   useEffect(() => {
     setChecked(false)
@@ -68,9 +88,7 @@ export function ChangeDialog({
         ? '确认灰度发布'
         : '确认保存并发布'
       : action.kind === 'rollback'
-        ? ruleId
-          ? '确认灰度回退'
-          : '确认全量回退'
+        ? '确认全量回退'
         : '确认转为全量'
   const submitLabel =
     action.kind === 'rollback'
@@ -86,20 +104,22 @@ export function ChangeDialog({
       const result =
         action.kind === 'save'
           ? await api.save(configKey, editPayload(current, action.draft))
-          : await api.copy(
-              configKey,
-              baselineOf(current),
-              action.source.number,
-              action.kind,
-              action.ruleId,
-            )
+          : action.kind === 'rollback'
+            ? await api.rollback(configKey, baselineOf(current), action.source.number)
+            : await api.promote(configKey, baselineOf(current), action.ruleId)
       client.setQueryData(configQueryKey(configKey), result.state)
       await Promise.all([
         client.invalidateQueries({ queryKey: ['configs'] }),
         client.invalidateQueries({ queryKey: ['config-index'] }),
         client.invalidateQueries({ queryKey: ['versions', configKey] }),
       ])
-      toast(result.changed ? `已发布 v${result.state.last_version}` : '内容未变化，未生成新版本。')
+      toast(
+        result.changed
+          ? graySave
+            ? `已更新 v${currentTarget!.number}-beta`
+            : `已发布 v${result.state.last_version}`
+          : '内容未变化。',
+      )
       onSuccess(result.state)
     } catch (e) {
       setError(e)
@@ -125,7 +145,7 @@ export function ChangeDialog({
         return
       }
       setCurrent(latest)
-      setComparison(targetVersion(latest, ruleId).number)
+      setComparison(targetVersion(latest, graySave ? ruleId : undefined).number)
       setDiffReady(false)
       onRebase?.(latest)
       client.setQueryData(configQueryKey(configKey), latest)
@@ -165,13 +185,24 @@ export function ChangeDialog({
     >
       <div className="publish-summary">
         <div>
-          <Badge tone="success">{ruleId ? '灰度发布' : '全量发布'}</Badge>
+          <Badge tone="success">{graySave ? '灰度发布' : '全量发布'}</Badge>
           <span className="mono">{configKey.name}</span>
-          {action.kind !== 'save' && <Badge>来源 v{action.source.number}</Badge>}
+          {action.kind !== 'save' && (
+            <Badge>
+              来源 v{(promotionSource ?? action.source).number}
+              {action.kind === 'promote' ? '-beta' : ''}
+            </Badge>
+          )}
           <ArrowRight size={14} aria-hidden="true" />
-          <strong>新版本 v{(current?.last_version ?? 0) + 1}</strong>
+          <strong>
+            {graySave
+              ? `更新临时版本 v${currentTarget?.number}-beta`
+              : `新版本 v${(current?.last_version ?? 0) + 1}`}
+          </strong>
         </div>
-        {(ruleId || !!current?.rules.length) && <p>{publicationImpact(current, ruleId)}</p>}
+        {(ruleId || !!current?.rules.length) && (
+          <p>{publicationImpact(current, graySave ? ruleId : undefined)}</p>
+        )}
       </div>
       <ErrorNotice error={error} />
       {isConflict && !blocked && current && (
@@ -183,42 +214,56 @@ export function ChangeDialog({
       {isConflict && !current && (
         <p className="field-error">该名称已存在，请返回编辑并更换名称。</p>
       )}
-      {noChange && (
-        <div className="notice info">内容与当前目标版本完全一致，不会产生新的版本。</div>
+      {noChange && <div className="notice info">内容与当前编辑目标一致，无需发布。</div>}
+      {graySave ? (
+        <p className="section-help">
+          比较当前灰度内容与本次编辑；发布后覆盖临时内容，不保留修改历史。
+        </p>
+      ) : (
+        <>
+          <div className="diff-toolbar">
+            <label>
+              <GitCompareArrows size={16} aria-hidden="true" />
+              对比版本
+              <select
+                aria-label="对比版本"
+                value={comparison}
+                onChange={(e) => {
+                  setComparison(Number(e.target.value))
+                  setChecked(false)
+                }}
+                disabled={busy || reloading}
+              >
+                {!current && <option value={0}>空内容（首次创建）</option>}
+                {current && (
+                  <option value={currentTarget!.number}>
+                    v{currentTarget!.number} · 当前编辑目标
+                  </option>
+                )}
+                {versions.data
+                  ?.filter((v) => v.number !== currentTarget?.number)
+                  .map((v) => (
+                    <option key={v.number} value={v.number}>
+                      v{v.number}
+                      {v.description ? ` · ${v.description}` : ''}
+                    </option>
+                  ))}
+              </select>
+            </label>
+          </div>
+          {versions.error && (
+            <ErrorNotice error={versions.error} onRetry={() => versions.refetch()} />
+          )}
+          {other.error && !known && (
+            <ErrorNotice error={other.error} onRetry={() => other.refetch()} />
+          )}
+        </>
       )}
-      <div className="diff-toolbar">
-        <label>
-          <GitCompareArrows size={16} aria-hidden="true" />
-          对比版本
-          <select
-            aria-label="对比版本"
-            value={comparison}
-            onChange={(e) => {
-              setComparison(Number(e.target.value))
-              setChecked(false)
-            }}
-            disabled={busy || reloading}
-          >
-            {!current && <option value={0}>空内容（首次创建）</option>}
-            {current && (
-              <option value={currentTarget!.number}>v{currentTarget!.number} · 当前编辑目标</option>
-            )}
-            {versions.data
-              ?.filter((v) => v.number !== currentTarget?.number)
-              .map((v) => (
-                <option key={v.number} value={v.number}>
-                  v{v.number}
-                  {v.description ? ` · ${v.description}` : ''}
-                </option>
-              ))}
-          </select>
-        </label>
-      </div>
-      {versions.error && <ErrorNotice error={versions.error} onRetry={() => versions.refetch()} />}
-      {other.error && !known && <ErrorNotice error={other.error} onRetry={() => other.refetch()} />}
       {before ? (
         <ConfigDiff
           key={`${current?.revision ?? 0}-${comparison}`}
+          beforeTitle={graySave ? '修改前 · 当前灰度内容' : undefined}
+          afterTitle={graySave ? '修改后 · 将覆盖临时内容' : undefined}
           before={before.content}
           after={after.content}
           beforeFormat={before.format}

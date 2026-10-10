@@ -17,11 +17,11 @@
 | Gin 后端与 flag/env 启动 | `cmd/main`、`internal/settings`、`internal/server` | Go 构建/vet、三实例 Compose 启动、CLI flag 覆盖 env |
 | Namespace / Group / 配置名与默认组织 | 迁移、组织与配置管理 API | 非空组织删除拒绝、配置读写测试 |
 | 递增不可变版本、描述、原文无变化不发布 | 事务 Save、Version、History | 保存/读取/历史/no-op 测试 |
-| 全量与灰度独立目标 | Save、SetRules、Resolve | 全量保存不影响固定灰度；灰度编辑只移动规则目标 |
+| 全量主版本与独立 beta | Save、SetRules、Resolve | 全量保存不影响 beta；灰度原位覆盖、编号不变、无历史 |
 | 灰度 AND、eq/in、首条命中、排序/停用/删除/试算 | Resolve、完整规则列表替换、simulate API | 首条匹配、缺失标签、停用回落、条件校验测试 |
-| 回退与提升新版本，保留其他目标 | CopyVersion、版本操作/来源记录 | 全量回退、灰度回退、提升及历史引用测试 |
+| 回退与提升新版本，保留其他目标 | CopyVersion、版本操作/来源记录 | 全量回退保持 beta、灰度回退拒绝、按规则转全量及主历史测试 |
 | 统一乐观锁与删除重建身份隔离 | 配置 UUID 和 revision 校验 | 两编辑者竞争、旧身份请求拒绝、HTTP 409 |
-| 历史数量、引用保护、短期维护租约、日志水位 | Cleanup、维护 worker | 近期与被引用版本保留、无引用旧版本删除、双租约拒绝 |
+| 历史数量、引用保护、短期维护租约、日志水位 | Cleanup、维护 worker | 近期主版本保留、beta 来源主历史可清理且 beta 保留、双租约拒绝 |
 | PostgreSQL / MySQL 与 golang-migrate | 两套 SQL、驱动适配器、独立迁移池、migrate 子命令 | PostgreSQL 全部集成；幂等迁移、业务池存活、dirty 拒绝；MySQL 仅静态审查 |
 | admin 首次初始化、纯 JWT、密码修改、Cookie 来源保护 | InitializeAdmin、认证与密码 API | 重启不覆盖密码、新密码登录/旧密码拒绝、旧 JWT 保持有效、非法 JWT 和跨来源请求拒绝 |
 | 客户端匿名 HTTP GET 与完整 WebSocket 推送 | client config/watch API | 未登录读取、创建前缺失、发布、删除、同名重建推送 |
@@ -50,3 +50,9 @@ SDK 负责采集/覆盖 sys.ip、sys.hostname、自定义标签保留名检查�
 ## 代码审查修复
 
 初审发现 MySQL INSERT 语法错误、查询超时导致就绪失效滞后、持续待发送消息可能挤占心跳。全部修复，两个审查轴复查均无剩余阻断问题。保留一项非阻断设计建议：以后可将 CopyVersion 的位置参数整理为带显式操作类型的请求结构。
+
+## 灰度模型调整（2026-10-10）
+
+见 ADR 0006：schema 2 将每规则 beta 保存为独立可修改正文，来源编号不外键引用主历史；规则元数据 API 不接受正文或目标版本。灰度编辑只更新 beta 和配置修订；回退仅支持主历史，转全量通过 rule_id 读取事务内当前 beta。主历史清理不影响关闭中的 beta。旧 schema 1 不兼容，启动和 migrate 要求使用空数据库重建，不自动删除数据。
+
+通知及 Go/Python SDK 去重增加规则身份、正文及格式，既保证同名 beta 更新可见，又抑制无关规则、全量及描述变化。测试使用指定 PostgreSQL 镜像和隔离数据库；MySQL 仅维护相应 SQL，未运行真实 MySQL 测试。

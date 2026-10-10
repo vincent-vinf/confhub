@@ -68,7 +68,7 @@ func (s *Store) load(ctx context.Context, r reader, k config.Key) (*config.State
 	if err != nil {
 		return nil, err
 	}
-	rows, err = r.QueryContext(ctx, s.query("SELECT number,content,format,description,action,source_version,created_at FROM config_versions WHERE config_id=? AND (number=? OR number IN (SELECT target_version FROM gray_rules WHERE config_id=?))"), state.ID, state.GlobalVersion, state.ID)
+	rows, err = r.QueryContext(ctx, s.query("SELECT number,content,format,description,action,source_version,created_at FROM config_versions WHERE config_id=? AND number=?"), state.ID, state.GlobalVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -195,39 +195,39 @@ func (s *Store) Save(ctx context.Context, k config.Key, edit config.Edit) (confi
 		if err = checkEdit(state, edit.ExpectedID, edit.ExpectedRevision); err != nil {
 			return config.Mutation{}, err
 		}
-		target := state.GlobalVersion
+
 		if edit.RuleID != "" {
-			found := false
-			for _, r := range state.Rules {
+			index := -1
+			for i, r := range state.Rules {
 				if r.ID == edit.RuleID {
-					target = r.TargetVersion
-					found = true
+					index = i
 					break
 				}
 			}
-			if !found {
+			if index < 0 {
 				return config.Mutation{}, config.ErrNotFound
 			}
+			beta := &state.Rules[index].Beta
+			if beta.Content == edit.Content && beta.Format == edit.Format && beta.Description == edit.Description {
+				return config.Mutation{State: state}, nil
+			}
+			beta.Content, beta.Format, beta.Description = edit.Content, edit.Format, edit.Description
+			state.Revision++
+			if err = s.persistTargets(ctx, tx, state); err != nil {
+				return config.Mutation{}, err
+			}
+			seq, err = s.publish(ctx, tx, state, seq, false)
+			return config.Mutation{State: state, Changed: err == nil, Sequence: seq}, err
 		}
-		if state.Versions[target].Content == edit.Content {
+		current := state.Versions[state.GlobalVersion]
+		if current.Content == edit.Content && current.Format == edit.Format {
 			return config.Mutation{State: state}, nil
 		}
 		state.LastVersion++
 		state.Revision++
-		if edit.RuleID == "" {
-			state.GlobalVersion = state.LastVersion
-		} else {
-			for i := range state.Rules {
-				if state.Rules[i].ID == edit.RuleID {
-					state.Rules[i].TargetVersion = state.LastVersion
-				}
-			}
-		}
+		state.GlobalVersion = state.LastVersion
 	}
 	action := "save"
-	if edit.RuleID != "" {
-		action = "gray_save"
-	}
 	v := config.Version{Number: state.LastVersion, Content: edit.Content, Format: edit.Format, Description: edit.Description, Action: action, CreatedAt: time.Now().UTC()}
 	if err = s.insertVersion(ctx, tx, state, v); err != nil {
 		return config.Mutation{}, err
@@ -253,7 +253,7 @@ func (s *Store) persistTargets(ctx context.Context, tx *sql.Tx, state *config.St
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, s.query("INSERT INTO gray_rules(config_id,id,position,target_version,rule_json) VALUES (?,?,?,?,?)"), state.ID, r.ID, i, r.TargetVersion, string(raw))
+		_, err = tx.ExecContext(ctx, s.query("INSERT INTO gray_rules(config_id,id,position,rule_json) VALUES (?,?,?,?)"), state.ID, r.ID, i, string(raw))
 		if err != nil {
 			return storageError(err)
 		}

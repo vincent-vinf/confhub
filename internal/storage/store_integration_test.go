@@ -68,7 +68,7 @@ func TestGlobalPublicationLeavesGrayClientsPinned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rules := []config.Rule{{ID: "canary", Name: "canary", Enabled: true, TargetVersion: 1, Conditions: []config.Condition{{Tag: "env", Operator: "eq", Values: []string{"gray"}}}}}
+	rules := []config.Rule{{ID: "canary", Name: "canary", Enabled: true, Conditions: []config.Condition{{Tag: "env", Operator: "eq", Values: []string{"gray"}}}}}
 	m, err = s.SetRules(ctx, k, m.State.ID, m.State.Revision, rules)
 	if err != nil {
 		t.Fatal(err)
@@ -88,7 +88,7 @@ func TestGlobalPublicationLeavesGrayClientsPinned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.State.GlobalVersion != 2 || config.Resolve(m.State, map[string]string{"env": "gray"}).Version != 3 {
+	if m.State.GlobalVersion != 2 || config.Resolve(m.State, map[string]string{"env": "gray"}).Version != 1 || config.Resolve(m.State, map[string]string{"env": "gray"}).Content != "three" {
 		t.Fatal("gray save changed global target")
 	}
 }
@@ -234,7 +234,7 @@ func TestNonemptyOrganizationCannotBeDeleted(t *testing.T) {
 	}
 }
 
-func TestCleanupKeepsReferencedHistoryAndRecordsEventGap(t *testing.T) {
+func TestCleanupDoesNotPinBetaBaseHistoryAndRecordsEventGap(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
 	k := key()
@@ -242,7 +242,7 @@ func TestCleanupKeepsReferencedHistoryAndRecordsEventGap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, err = s.SetRules(ctx, k, m.State.ID, m.State.Revision, []config.Rule{{ID: "pinned", Enabled: false, TargetVersion: 1, Conditions: []config.Condition{{Tag: "a", Operator: "eq", Values: []string{"b"}}}}})
+	m, err = s.SetRules(ctx, k, m.State.ID, m.State.Revision, []config.Rule{{ID: "pinned", Enabled: false, Conditions: []config.Condition{{Tag: "a", Operator: "eq", Values: []string{"b"}}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,8 +256,17 @@ func TestCleanupKeepsReferencedHistoryAndRecordsEventGap(t *testing.T) {
 	if err != nil || !acquired {
 		t.Fatalf("cleanup: %v %v", acquired, err)
 	}
-	if _, err = s.Version(ctx, k, 1); err != nil {
-		t.Fatal("disabled rule's target was pruned")
+	if _, err = s.Version(ctx, k, 1); !errors.Is(err, config.ErrNotFound) {
+		t.Fatal("beta base pinned historical main content")
+	}
+	snapshot, err := s.Snapshot(ctx, k)
+	if err != nil || snapshot.Rules[0].Beta.Content != "one" {
+		t.Fatalf("beta content pruned: %+v %v", snapshot, err)
+	}
+	snapshot.Rules[0].Enabled = true
+	reenabled, err := s.SetRules(ctx, k, snapshot.ID, snapshot.Revision, snapshot.Rules)
+	if err != nil || config.Resolve(reenabled.State, map[string]string{"a": "b"}).Content != "one" {
+		t.Fatal("disabled beta was not preserved", err)
 	}
 	if _, err = s.Version(ctx, k, 2); !errors.Is(err, config.ErrNotFound) {
 		t.Fatal("unreferenced old version retained")
@@ -277,7 +286,7 @@ func TestCleanupKeepsReferencedHistoryAndRecordsEventGap(t *testing.T) {
 	}
 }
 
-func TestGrayRollbackAndPromotionLeaveOtherTargetsIntact(t *testing.T) {
+func TestMainRollbackAndBetaPromotionLeaveGrayContentIntact(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
 	k := key()
@@ -285,7 +294,7 @@ func TestGrayRollbackAndPromotionLeaveOtherTargetsIntact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, err = s.SetRules(ctx, k, m.State.ID, m.State.Revision, []config.Rule{{ID: "canary", Enabled: true, TargetVersion: 1, Conditions: []config.Condition{{Tag: "env", Operator: "eq", Values: []string{"gray"}}}}})
+	m, err = s.SetRules(ctx, k, m.State.ID, m.State.Revision, []config.Rule{{ID: "canary", Enabled: true, Conditions: []config.Condition{{Tag: "env", Operator: "eq", Values: []string{"gray"}}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,25 +306,93 @@ func TestGrayRollbackAndPromotionLeaveOtherTargetsIntact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, err = s.CopyVersion(ctx, k, m.State.ID, m.State.Revision, 1, "canary", true)
+	if _, err = s.CopyVersion(ctx, k, m.State.ID, m.State.Revision, 1, "canary", true); !errors.Is(err, config.ErrInvalid) {
+		t.Fatal("gray rollback accepted", err)
+	}
+	m, err = s.CopyVersion(ctx, k, m.State.ID, m.State.Revision, 1, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.State.GlobalVersion != 2 || m.State.Rules[0].TargetVersion != 4 || m.State.Versions[4].Action != "gray_rollback" {
-		t.Fatal("gray rollback changed global target")
+	if m.State.GlobalVersion != 3 || m.State.Rules[0].Beta.BaseVersion != 1 || m.State.Rules[0].Beta.Content != "three" {
+		t.Fatal("main rollback changed beta")
 	}
-	m, err = s.CopyVersion(ctx, k, m.State.ID, m.State.Revision, 4, "", false)
+	m, err = s.CopyVersion(ctx, k, m.State.ID, m.State.Revision, 0, "canary", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.State.GlobalVersion != 5 || m.State.Rules[0].TargetVersion != 4 || m.State.Versions[5].Content != "one" {
-		t.Fatal("promotion changed gray rule")
+	if m.State.GlobalVersion != 4 || m.State.Rules[0].Beta.BaseVersion != 1 || m.State.Rules[0].Beta.Content != "three" || m.State.Versions[4].Content != "three" || !m.State.Rules[0].Enabled {
+		t.Fatal("promotion changed beta rule")
+	}
+	noop, err := s.CopyVersion(ctx, k, m.State.ID, m.State.Revision, 0, "canary", false)
+	if err != nil || noop.Changed || noop.State.LastVersion != 4 {
+		t.Fatal("identical promotion wasn't a no-op", err)
 	}
 	page, err := s.History(ctx, k, 0, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(page.Versions) != 2 || page.NextBefore != 4 || len(page.Versions[0].References) != 1 || page.Versions[0].References[0] != "global" || page.Versions[1].References[0] != "canary" {
+	if len(page.Versions) != 2 || page.NextBefore != 3 || len(page.Versions[0].References) != 1 || page.Versions[0].References[0] != "global" || len(page.Versions[1].References) != 0 {
 		t.Fatalf("history references: %+v", page)
+	}
+}
+
+func TestGrayEditsOverwriteWithoutConsumingMainVersions(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	k := key()
+	m, err := s.Save(ctx, k, config.Edit{Content: "base", Format: "text"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err = s.SetRules(ctx, k, m.State.ID, m.State.Revision, []config.Rule{
+		{ID: "first", Enabled: true, Conditions: []config.Condition{{Tag: "env", Operator: "eq", Values: []string{"first"}}}},
+		{ID: "second", Enabled: true, Conditions: []config.Condition{{Tag: "env", Operator: "eq", Values: []string{"second"}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, content := range []string{"beta-one", "beta-two"} {
+		m, err = s.Save(ctx, k, config.Edit{ExpectedID: m.State.ID, ExpectedRevision: m.State.Revision, RuleID: "first", Content: content, Format: "text"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if m.State.LastVersion != 1 || m.State.GlobalVersion != 1 {
+			t.Fatal("beta edit consumed a main version")
+		}
+	}
+	state, err := s.Snapshot(ctx, k)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := config.Resolve(state, map[string]string{"env": "first"})
+	second := config.Resolve(state, map[string]string{"env": "second"})
+	if first.Version != 1 || first.Content != "beta-two" || second.Content != "base" || config.Resolve(state, nil).Content != "base" {
+		t.Fatalf("beta isolation: %+v %+v", first, second)
+	}
+	metadata := append([]config.Rule(nil), state.Rules...)
+	metadata[0].Name = "renamed"
+	metadata[0].Beta = config.Beta{BaseVersion: 99, Content: "untrusted overwrite", Format: "text"}
+	m, err = s.SetRules(ctx, k, state.ID, state.Revision, metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.State.Rules[0].Beta.BaseVersion != 1 || m.State.Rules[0].Beta.Content != "beta-two" {
+		t.Fatal("metadata edited beta content or origin")
+	}
+	noop, err := s.Save(ctx, k, config.Edit{ExpectedID: m.State.ID, ExpectedRevision: m.State.Revision, RuleID: "first", Content: "beta-two", Format: "text"})
+	if err != nil || noop.Changed || noop.Sequence != 0 {
+		t.Fatal("identical beta edit published", err)
+	}
+	m, err = s.SetRules(ctx, k, m.State.ID, m.State.Revision, m.State.Rules[1:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Save(ctx, k, config.Edit{ExpectedID: m.State.ID, ExpectedRevision: m.State.Revision, RuleID: "first", Content: "deleted", Format: "text"}); !errors.Is(err, config.ErrNotFound) {
+		t.Fatal("deleted beta could still be edited", err)
+	}
+
+	history, err := s.History(ctx, k, 0, 100)
+	if err != nil || len(history.Versions) != 1 {
+		t.Fatalf("beta leaked into history: %+v %v", history, err)
 	}
 }

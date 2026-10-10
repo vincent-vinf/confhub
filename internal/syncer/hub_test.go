@@ -22,7 +22,7 @@ func TestIndependentReplicasConvergeAndUnaffectedGrayClientStaysPinned(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, err = store.SetRules(ctx, k, m.State.ID, m.State.Revision, []config.Rule{{ID: "pin", Enabled: true, TargetVersion: 1, Conditions: []config.Condition{{Tag: "env", Operator: "eq", Values: []string{"gray"}}}}})
+	m, err = store.SetRules(ctx, k, m.State.ID, m.State.Revision, []config.Rule{{ID: "pin", Enabled: true, Conditions: []config.Condition{{Tag: "env", Operator: "eq", Values: []string{"gray"}}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,6 +76,44 @@ func TestIndependentReplicasConvergeAndUnaffectedGrayClientStaysPinned(t *testin
 	if _, err = gray.Next(quietCtx); err == nil {
 		t.Fatal("unaffected gray client notified")
 	}
+	for _, content := range []string{"beta-one", "beta-two"} {
+		m, err = store.Save(ctx, k, config.Edit{ExpectedID: m.State.ID, ExpectedRevision: m.State.Revision, RuleID: "pin", Content: content, Format: "text"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		a.Wake()
+		beta, err := gray.Next(nextCtx)
+		if err != nil || beta.Version != 1 || beta.RuleID != "pin" || beta.Content != content {
+			t.Fatalf("same-name beta update: %+v %v", beta, err)
+		}
+	}
+	// A format change with identical text still changes the effective payload.
+	m, err = store.Save(ctx, k, config.Edit{ExpectedID: m.State.ID, ExpectedRevision: m.State.Revision, RuleID: "pin", Content: "beta-two", Format: "yaml"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Wake()
+	formatted, err := gray.Next(nextCtx)
+	if err != nil || formatted.Version != 1 || formatted.Content != "beta-two" || formatted.Format != "yaml" {
+		t.Fatalf("format-only beta update: %+v %v", formatted, err)
+	}
+	m, err = store.Save(ctx, k, config.Edit{ExpectedID: m.State.ID, ExpectedRevision: m.State.Revision, RuleID: "pin", Content: "beta-two", Format: "yaml", Description: "metadata only"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Wake()
+	quietGray, cancelGray := context.WithTimeout(ctx, 50*time.Millisecond)
+	defer cancelGray()
+	if _, err = gray.Next(quietGray); err == nil {
+		t.Fatal("description-only edit notified gray client")
+	}
+
+	quietNormal, cancelNormal := context.WithTimeout(ctx, 50*time.Millisecond)
+	defer cancelNormal()
+	if _, err = normal.Next(quietNormal); err == nil {
+		t.Fatal("beta edit notified unaffected global client")
+	}
+
 }
 
 type outageSource struct {
@@ -110,7 +148,7 @@ func TestDatabaseOutageClosesSessionsAndRecoveryLoadsCurrentState(t *testing.T) 
 	source := &outageSource{Source: store}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	h := syncer.New(source, syncer.Options{PollInterval: 5 * time.Millisecond, FailureTimeout: 30 * time.Millisecond, CacheBytes: 4096})
+	h := syncer.New(source, syncer.Options{PollInterval: 5 * time.Millisecond, FailureTimeout: 200 * time.Millisecond, CacheBytes: 4096})
 	go h.Run(ctx)
 	waitReady(t, h, true)
 	k := config.Key{Namespace: "public", Group: "DEFAULT_GROUP", Name: "service"}

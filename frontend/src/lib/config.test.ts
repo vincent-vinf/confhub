@@ -13,7 +13,7 @@ export const rule: GrayRule = {
   id: 'gray',
   name: '预发布',
   enabled: true,
-  target_version: 1,
+  beta: { base_version: 1, content: '{"v":1}', format: 'json', description: '' },
   conditions: [{ tag: 'env', operator: 'eq', values: ['gray'] }],
 }
 export const state: ConfigState = {
@@ -45,7 +45,7 @@ export const state: ConfigState = {
 }
 
 describe('发布边界', () => {
-  it('全量与灰度分别从自己的固定目标编辑，说明不继承', () => {
+  it('全量与灰度分别从自己的内容编辑，全量说明不继承', () => {
     expect(draftFrom(state)).toEqual({
       content: '{"v":2}',
       format: 'json',
@@ -54,6 +54,25 @@ describe('发布边界', () => {
     })
     expect(draftFrom(state, 'gray').content).toBe('{"v":1}')
     expect(() => draftFrom(state, 'removed')).toThrow('编辑目标')
+  })
+  it('灰度直接读取规则正文，不依赖主历史，重新编辑保留灰度说明', () => {
+    const edited = structuredClone(state)
+    edited.rules[0] = {
+      ...edited.rules[0],
+      beta: {
+        base_version: 1,
+        content: '{"beta":"updated"}',
+        format: 'json',
+        description: '灰度说明',
+      },
+    }
+    delete edited.versions[1]
+    expect(draftFrom(edited, 'gray')).toEqual({
+      content: '{"beta":"updated"}',
+      format: 'json',
+      description: '灰度说明',
+      ruleId: 'gray',
+    })
   })
   it('乐观锁携带配置身份与修订，而非比较版本', () => {
     expect(editPayload(state, { ...draftFrom(state, 'gray'), content: 'new' })).toEqual({
@@ -68,7 +87,7 @@ describe('发布边界', () => {
     expect(baselineOf()).toEqual({ expected_id: '', expected_revision: 0 })
   })
   it('发布影响明确说明固定灰度和全量边界', () => {
-    expect(publicationImpact(state)).toContain('1 条灰度规则继续使用各自固定版本')
+    expect(publicationImpact(state)).toContain('1 条灰度规则继续使用各自临时内容')
     expect(publicationImpact(state, 'gray')).toContain('全量 v2')
   })
 })

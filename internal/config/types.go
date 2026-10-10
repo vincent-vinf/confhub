@@ -1,4 +1,4 @@
-// Package config defines configuration identities, immutable versions and gray routing.
+// Package config defines configuration identities, main versions and mutable gray content.
 package config
 
 import (
@@ -54,12 +54,32 @@ type Condition struct {
 	Operator string   `json:"operator"`
 	Values   []string `json:"values"`
 }
+
+// Beta is the mutable content owned by one rule. BaseVersion is a label,
+// not a reference that pins a historical main version.
+type Beta struct {
+	BaseVersion int64  `json:"base_version"`
+	Content     string `json:"content"`
+	Format      string `json:"format"`
+	Description string `json:"description"`
+}
+type RuleInput struct {
+	ID         string      `json:"id"`
+	Name       string      `json:"name"`
+	Enabled    bool        `json:"enabled"`
+	Conditions []Condition `json:"conditions"`
+}
+
+func (r RuleInput) Rule() Rule {
+	return Rule{ID: r.ID, Name: r.Name, Enabled: r.Enabled, Conditions: r.Conditions}
+}
+
 type Rule struct {
-	ID            string      `json:"id"`
-	Name          string      `json:"name"`
-	Enabled       bool        `json:"enabled"`
-	TargetVersion int64       `json:"target_version"`
-	Conditions    []Condition `json:"conditions"`
+	ID         string      `json:"id"`
+	Name       string      `json:"name"`
+	Enabled    bool        `json:"enabled"`
+	Beta       Beta        `json:"beta"`
+	Conditions []Condition `json:"conditions"`
 }
 type State struct {
 	Sequence      int64             `json:"sequence"`

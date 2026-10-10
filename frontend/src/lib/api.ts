@@ -120,18 +120,26 @@ export const api = {
   rules: (key: ConfigKey, baseline: Baseline, rules: GrayRule[]) =>
     request<Mutation>(
       `${configPath(key)}/rules`,
-      body('PUT', { ...baseline, rules, confirmed: true }),
+      body('PUT', {
+        ...baseline,
+        rules: rules.map(({ id, name, enabled, conditions }) => ({
+          id,
+          name,
+          enabled,
+          conditions,
+        })),
+        confirmed: true,
+      }),
     ),
-  copy: (
-    key: ConfigKey,
-    baseline: Baseline,
-    source_version: number,
-    action: 'rollback' | 'promote',
-    rule_id?: string,
-  ) =>
+  rollback: (key: ConfigKey, baseline: Baseline, source_version: number) =>
     request<Mutation>(
-      `${configPath(key)}/${action}`,
-      body('POST', { ...baseline, source_version, rule_id, confirmed: true }),
+      `${configPath(key)}/rollback`,
+      body('POST', { ...baseline, source_version, confirmed: true }),
+    ),
+  promote: (key: ConfigKey, baseline: Baseline, rule_id: string) =>
+    request<Mutation>(
+      `${configPath(key)}/promote`,
+      body('POST', { ...baseline, rule_id, confirmed: true }),
     ),
   simulate: (key: ConfigKey, tags: Record<string, string>) =>
     request<Effective>(`${configPath(key)}/simulate`, body('POST', { tags })),

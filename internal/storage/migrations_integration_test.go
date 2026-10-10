@@ -54,3 +54,25 @@ func TestDirtySchemaIsNeverAutomaticallyForced(t *testing.T) {
 		}
 	}
 }
+
+func TestLegacySchemaRequiresExplicitDatabaseRecreation(t *testing.T) {
+	dsn := testutil.Database(t)
+	if err := storage.Migrate("postgres", dsn, false); err != nil {
+		t.Fatal(err)
+	}
+	setup, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer setup.Close()
+	// Model an old deployment's schema marker without touching a real database.
+	if _, err = setup.Exec("UPDATE schema_migrations SET version=1"); err != nil {
+		t.Fatal(err)
+	}
+	for _, initialize := range []bool{true, false} {
+		err = storage.Migrate("postgres", dsn, initialize)
+		if err == nil || !strings.Contains(err.Error(), "recreate an empty database") {
+			t.Fatalf("legacy schema was accepted: %v", err)
+		}
+	}
+}

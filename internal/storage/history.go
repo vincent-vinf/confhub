@@ -24,25 +24,37 @@ func (s *Store) CopyVersion(ctx context.Context, k config.Key, id string, revisi
 	if err = checkEdit(state, id, revision); err != nil {
 		return config.Mutation{}, err
 	}
-	v, err := scanVersion(tx.QueryRowContext(ctx, s.query("SELECT number,content,format,description,action,source_version,created_at FROM config_versions WHERE config_id=? AND number=?"), state.ID, source))
-	if err != nil {
-		return config.Mutation{}, err
-	}
-	target := state.GlobalVersion
-	ruleIndex := -1
-	if ruleID != "" {
-		for i, r := range state.Rules {
+
+	var v config.Version
+	if rollback {
+		if ruleID != "" || source < 1 {
+			return config.Mutation{}, fmt.Errorf("%w: rollback only supports main versions", config.ErrInvalid)
+		}
+		v, err = scanVersion(tx.QueryRowContext(ctx, s.query("SELECT number,content,format,description,action,source_version,created_at FROM config_versions WHERE config_id=? AND number=?"), state.ID, source))
+		if err != nil {
+			return config.Mutation{}, err
+		}
+		v.Action = "rollback"
+		v.Description = fmt.Sprintf("Rollback from version %d", source)
+	} else {
+		if ruleID == "" || source != 0 {
+			return config.Mutation{}, fmt.Errorf("%w: promotion requires a gray rule, not a historical version", config.ErrInvalid)
+		}
+		found := false
+		for _, r := range state.Rules {
 			if r.ID == ruleID {
-				target = r.TargetVersion
-				ruleIndex = i
+				v = config.Version{Content: r.Beta.Content, Format: r.Beta.Format, Description: r.Beta.Description, Action: "promote"}
+				source = r.Beta.BaseVersion
+				found = true
 				break
 			}
 		}
-		if ruleIndex < 0 {
+		if !found {
 			return config.Mutation{}, config.ErrNotFound
 		}
 	}
-	if state.Versions[target].Content == v.Content {
+	current := state.Versions[state.GlobalVersion]
+	if current.Content == v.Content && current.Format == v.Format {
 		return config.Mutation{State: state}, nil
 	}
 	state.LastVersion++
@@ -50,20 +62,7 @@ func (s *Store) CopyVersion(ctx context.Context, k config.Key, id string, revisi
 	v.Number = state.LastVersion
 	v.SourceVersion = source
 	v.CreatedAt = time.Now().UTC()
-	if rollback {
-		v.Action = "rollback"
-		v.Description = fmt.Sprintf("Rollback from version %d", source)
-		if ruleID != "" {
-			v.Action = "gray_rollback"
-		}
-	} else {
-		v.Action = "promote"
-	}
-	if ruleIndex < 0 {
-		state.GlobalVersion = v.Number
-	} else {
-		state.Rules[ruleIndex].TargetVersion = v.Number
-	}
+	state.GlobalVersion = v.Number
 	if err = s.insertVersion(ctx, tx, state, v); err != nil {
 		return config.Mutation{}, err
 	}
@@ -111,11 +110,6 @@ func (s *Store) History(ctx context.Context, k config.Key, before int64, limit i
 		v.CreatedAt = time.UnixMicro(created).UTC()
 		if v.Number == state.GlobalVersion {
 			v.References = append(v.References, "global")
-		}
-		for _, r := range state.Rules {
-			if r.TargetVersion == v.Number {
-				v.References = append(v.References, r.ID)
-			}
 		}
 		page.Versions = append(page.Versions, v)
 	}

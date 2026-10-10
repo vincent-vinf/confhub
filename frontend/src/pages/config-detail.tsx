@@ -73,7 +73,7 @@ function Detail({ configKey }: { configKey: ConfigKey }) {
     (!target ||
       draft.content !== target.content ||
       draft.format !== target.format ||
-      draft.description !== '')
+      draft.description !== (draft.ruleId ? target?.description : ''))
   useDirty(`配置「${configKey.name}」的未保存编辑`, dirty)
   function applyState(state: ConfigState, preserveDraft = false) {
     client.setQueryData(configQueryKey(configKey), state)
@@ -236,7 +236,7 @@ function Detail({ configKey }: { configKey: ConfigKey }) {
                   <option value="global">全量配置 · v{baseline.global_version}</option>
                   {baseline.rules.map((rule) => (
                     <option key={rule.id} value={rule.id}>
-                      {rule.name || rule.id} · v{rule.target_version}
+                      {rule.name || rule.id} · v{rule.beta.base_version}-beta
                       {rule.enabled ? '' : '（停用）'}
                     </option>
                   ))}
@@ -324,8 +324,8 @@ function Detail({ configKey }: { configKey: ConfigKey }) {
           <div className="editor-footer">
             <div className="editor-footer-help">
               {draft.ruleId
-                ? '保存仅更新此灰度规则的目标版本。'
-                : '保存即全量发布，固定灰度版本保持不变。'}
+                ? '保存覆盖此规则的临时内容，不保留修改历史。'
+                : '保存即全量发布，各规则的灰度内容保持不变。'}
             </div>
             <div className="button-row">
               <Button

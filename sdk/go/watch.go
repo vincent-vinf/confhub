@@ -113,7 +113,7 @@ func (c *Client) Unsubscribe(key Key) error {
 }
 
 func (c *Client) enqueueLocked(sub *subscription, value Snapshot) {
-	if sub.last != nil && sub.last.ID == value.ID && sub.last.Version == value.Version && sub.last.Deleted == value.Deleted {
+	if sub.last != nil && sub.last.ID == value.ID && sub.last.Version == value.Version && sub.last.Deleted == value.Deleted && sub.last.RuleID == value.RuleID && sub.last.Content == value.Content && sub.last.Format == value.Format {
 		return
 	}
 	copy := value

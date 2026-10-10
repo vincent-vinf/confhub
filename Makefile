@@ -1,4 +1,6 @@
 BINARY := bin/confhub
+# Explicit packages avoid walking unreadable database bind mounts under data/.
+SERVER_PACKAGES := ./cmd/... ./internal/...
 PACKAGE := ./cmd/main
 DOCKER_REGISTRY ?= registry.cn-hangzhou.aliyuncs.com
 DOCKER_IMAGE ?= $(DOCKER_REGISTRY)/bodesi/confhub
@@ -9,7 +11,7 @@ go-mod-download:
 	go mod download
 
 test: go-mod-download
-	go test ./...
+	go test $(SERVER_PACKAGES)
 
 test-unit:
 	go test ./internal/config
@@ -20,10 +22,10 @@ test-integration:
 
 test-race:
 	@test -n "$(CONFHUB_TEST_POSTGRES_DSN)" || (echo "CONFHUB_TEST_POSTGRES_DSN is required"; exit 1)
-	CGO_ENABLED=1 go test -race -count=1 ./...
+	CGO_ENABLED=1 go test -race -count=1 $(SERVER_PACKAGES)
 
 vet:
-	go vet ./...
+	go vet $(SERVER_PACKAGES)
 
 build: go-mod-download
 	@mkdir -p $(dir $(BINARY))
