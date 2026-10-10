@@ -198,7 +198,6 @@ export function HistoryPanel({
           open
           onClose={() => setViewing(undefined)}
           title={`历史版本 v${viewing}`}
-          description="此版本是只读快照，可进行比较或回退。"
           wide
           footer={<Button onClick={() => setViewing(undefined)}>关闭</Button>}
         >
@@ -275,7 +274,6 @@ function HistoryCompare({
     <Modal
       open
       title="比较历史版本"
-      description="比较只读历史内容，不会改变任何发布目标。"
       wide
       onClose={onClose}
       footer={<Button onClick={onClose}>关闭</Button>}

@@ -97,8 +97,14 @@ test('历史查看、任意版本比较、切换比较保持保存基准、回�
   await edit(page, '{"v":3}')
   await page.getByRole('button', { name: '保存并发布' }).click()
   await page.getByLabel('对比版本', { exact: true }).selectOption('1')
-  await expect(page.getByRole('dialog')).toContainText('保存基准：r2')
+  const saveRequest = page.waitForRequest(
+    (request) => request.method() === 'PUT' && request.url().endsWith(path(name)),
+  )
   await confirm(page)
+  expect((await saveRequest).postDataJSON()).toMatchObject({
+    expected_id: s.id,
+    expected_revision: s.revision,
+  })
   await page.getByRole('tab', { name: '版本历史' }).click()
   await page.getByRole('button', { name: '查看 v1', exact: true }).click()
   await expect(page.getByRole('textbox', { name: '历史 v1 内容' })).toHaveText('{"v":1}')

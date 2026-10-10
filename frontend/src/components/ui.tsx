@@ -1,6 +1,6 @@
 import * as Dialog from '@radix-ui/react-dialog'
 import { AlertCircle, Check, FileText, LoaderCircle, X } from 'lucide-react'
-import { useRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
+import { useId, useRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { messageOf } from '../lib/api'
 
 export function Button({
@@ -86,13 +86,14 @@ export function Modal({
   open: boolean
   onClose: () => void
   title: string
-  description: string
+  description?: string
   children?: ReactNode
   footer?: ReactNode
   wide?: boolean
   busy?: boolean
   closable?: boolean
 }) {
+  const descriptionID = useId()
   const returnFocus = useRef<HTMLElement | null>(
     document.activeElement instanceof HTMLElement ? document.activeElement : null,
   )
@@ -107,6 +108,7 @@ export function Modal({
         <Dialog.Overlay className="modal-overlay" />
         <Dialog.Content
           className={`modal ${wide ? 'wide' : ''}`}
+          aria-describedby={description ? descriptionID : undefined}
           onOpenAutoFocus={() => {
             if (document.activeElement instanceof HTMLElement) {
               returnFocus.current = document.activeElement
@@ -128,7 +130,11 @@ export function Modal({
           <header className="modal-header">
             <div>
               <Dialog.Title className="modal-title">{title}</Dialog.Title>
-              <Dialog.Description className="modal-description">{description}</Dialog.Description>
+              {description && (
+                <Dialog.Description id={descriptionID} className="modal-description">
+                  {description}
+                </Dialog.Description>
+              )}
             </div>
             {closable && (
               <Button

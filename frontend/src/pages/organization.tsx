@@ -32,7 +32,6 @@ export function OrganizationPage() {
         <div>
           <span className="eyebrow">WORKSPACE ORGANIZATION</span>
           <h1>命名空间</h1>
-          <p>使用命名空间与分组组织配置，按你的业务习惯划分。</p>
         </div>
         <Button
           variant="primary"
@@ -92,7 +91,6 @@ export function OrganizationPage() {
                 <Folder size={18} aria-hidden="true" />
                 分组 {active && <Badge>{active}</Badge>}
               </div>
-              <p className="section-help">命名空间内的第二层组织结构。</p>
             </div>
             <Button
               disabled={!active}

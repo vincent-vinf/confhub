@@ -1003,11 +1003,6 @@ tbody tr:hover {
   width: 100%;
   font-size: 13px;
 }
-.editor-description small {
-  display: block;
-  color: var(--muted);
-  margin-top: 7px;
-}
 .editor-footer {
   display: flex;
   justify-content: space-between;
@@ -1015,6 +1010,9 @@ tbody tr:hover {
   gap: 20px;
   padding: 17px 20px;
   border-top: 1px solid var(--border);
+}
+.editor-footer > .button:only-child {
+  margin-left: auto;
 }
 .editor-footer-help {
   color: var(--muted);
@@ -1162,10 +1160,6 @@ tbody tr:hover {
   max-width: 330px;
   font-size: 12px;
 }
-.diff-toolbar > span {
-  font-size: 12px;
-  color: var(--muted);
-}
 .diff-frame {
   border: 1px solid var(--border);
   border-radius: 7px;
@@ -1217,12 +1211,6 @@ tbody tr:hover {
 }
 .confirmation-row {
   margin-top: 19px;
-}
-.confirmation-row small {
-  display: block;
-  color: var(--muted);
-  margin-top: 7px;
-  margin-left: 30px;
 }
 .check-label {
   display: flex;

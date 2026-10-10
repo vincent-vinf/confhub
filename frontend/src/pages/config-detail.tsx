@@ -163,7 +163,6 @@ function Detail({ configKey }: { configKey: ConfigKey }) {
             <h1 className="mono">{configKey.name}</h1>
             <Badge tone="success">全量 v{baseline.global_version}</Badge>
           </div>
-          <p>管理内容和发布范围，每一次修改都有独立版本。</p>
         </div>
         <Button variant="ghost" className="destructive-text" onClick={() => setDeleting(true)}>
           <Trash2 size={16} aria-hidden="true" />
@@ -321,7 +320,6 @@ function Detail({ configKey }: { configKey: ConfigKey }) {
               value={draft.description}
               onChange={(e) => setDraft({ ...draft, description: e.target.value })}
             />
-            <small>版本说明随内容变更保存。格式化后的排版变化也会进入保存比较。</small>
           </div>
           <div className="editor-footer">
             <div className="editor-footer-help">

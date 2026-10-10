@@ -101,7 +101,6 @@ export function ConfigCreatePage() {
         <div>
           <span className="eyebrow">NEW CONFIGURATION</span>
           <h1>新建配置</h1>
-          <p>从第一版开始，每次变更都经过比较与确认。</p>
         </div>
         <span className="heading-icon">
           <FilePlus2 size={30} aria-hidden="true" />
@@ -200,7 +199,6 @@ export function ConfigCreatePage() {
           />
         </div>
         <div className="editor-footer">
-          <span className="editor-footer-help">保存前展示空内容到新内容的差异。</span>
           <Button variant="primary" busy={busy} onClick={prepare}>
             <Save size={16} aria-hidden="true" />
             保存并发布

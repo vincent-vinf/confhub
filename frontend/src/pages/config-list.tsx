@@ -89,7 +89,6 @@ export function ConfigListPage() {
         <div>
           <span className="eyebrow">CONFIGURATIONS</span>
           <h1>配置管理</h1>
-          <p>在一个地方管理内容、版本与发布规则。</p>
         </div>
         <Link
           className="button primary"

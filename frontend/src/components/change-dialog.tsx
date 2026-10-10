@@ -142,7 +142,6 @@ export function ChangeDialog({
       open
       onClose={onClose}
       title={title}
-      description="先核对内容差异，再确认这次变更影响的发布范围。"
       wide
       busy={busy}
       footer={
@@ -168,16 +167,11 @@ export function ChangeDialog({
         <div>
           <Badge tone="success">{ruleId ? '灰度发布' : '全量发布'}</Badge>
           <span className="mono">{configKey.name}</span>
+          {action.kind !== 'save' && <Badge>来源 v{action.source.number}</Badge>}
           <ArrowRight size={14} aria-hidden="true" />
           <strong>新版本 v{(current?.last_version ?? 0) + 1}</strong>
         </div>
-        <p>{publicationImpact(current, ruleId)}</p>
-        {action.kind !== 'save' && (
-          <p>
-            复制历史 v{action.source.number} 的内容生成新版本；历史记录保留。
-            {action.kind === 'rollback' && '版本说明会自动标记回退来源。'}
-          </p>
-        )}
+        {(ruleId || !!current?.rules.length) && <p>{publicationImpact(current, ruleId)}</p>}
       </div>
       <ErrorNotice error={error} />
       {isConflict && !blocked && current && (
@@ -219,9 +213,6 @@ export function ChangeDialog({
               ))}
           </select>
         </label>
-        <span>
-          保存基准：{current ? `r${current.revision}` : '首次创建'} · 切换对比不改变保存基准
-        </span>
       </div>
       {versions.error && <ErrorNotice error={versions.error} onRetry={() => versions.refetch()} />}
       {other.error && !known && <ErrorNotice error={other.error} onRetry={() => other.refetch()} />}
@@ -239,7 +230,6 @@ export function ChangeDialog({
       )}
       <div className="confirmation-row">
         <Confirmation checked={checked} onChange={setChecked} />
-        <small>确认后立即生效，不创建未发布草稿。</small>
       </div>
     </Modal>
   )
