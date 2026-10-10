@@ -25,7 +25,7 @@ services:
       POSTGRES_DB: confhub
       POSTGRES_USER: confhub
       POSTGRES_PASSWORD: ${CONFHUB_DB_PASSWORD:?set CONFHUB_DB_PASSWORD in .env}
-    volumes: ["postgres-data:/var/lib/postgresql/data"]
+    volumes: ["./data/postgres:/var/lib/postgresql/data"]
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U confhub -d confhub"]
@@ -43,5 +43,3 @@ services:
     <<: *app
     profiles: [ha]
     ports: ["${CONFHUB_PORT3:-8082}:8080"]
-volumes:
-  postgres-data:

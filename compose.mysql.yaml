@@ -27,7 +27,7 @@ services:
       MYSQL_USER: confhub
       MYSQL_PASSWORD: ${CONFHUB_DB_PASSWORD:?set CONFHUB_DB_PASSWORD in .env}
       MYSQL_ROOT_PASSWORD: ${CONFHUB_DB_ROOT_PASSWORD:?set CONFHUB_DB_ROOT_PASSWORD in .env}
-    volumes: ["mysql-data:/var/lib/mysql"]
+    volumes: ["./data/mysql:/var/lib/mysql"]
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_PASSWORD mysql -h 127.0.0.1 -u confhub -e 'SELECT 1' confhub >/dev/null"]
@@ -45,5 +45,3 @@ services:
     <<: *app
     profiles: [ha]
     ports: ["${CONFHUB_PORT3:-8082}:8080"]
-volumes:
-  mysql-data:

@@ -9,6 +9,7 @@ bin/
 dist/
 log/
 /storage/
+/data/
 tmp/
 vendor/
 .env

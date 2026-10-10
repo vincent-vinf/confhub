@@ -58,7 +58,7 @@ docker compose --profile ha up -d --build
 
 Compose 自动读取根目录 `.env`，并将其中的应用参数传入各实例；已导出的同名环境变量优先于 `.env` 中用于 Compose 插值的值。数据库类型和 DSN 由所选 Compose 文件生成。真实 `.env` 已被 Git 和 Docker 构建上下文忽略，只提交 `.env.example`。
 
-默认端口 8080、8081、8082，可通过 `CONFHUB_PORT/PORT2/PORT3` 修改。数据库使用持久卷；单个数据库容器不提供数据库 HA。默认 PostgreSQL 镜像为 `registry.cn-hangzhou.aliyuncs.com/bodesi/postgres:17`。模板将数据库密码放入 DSN，使用不包含 URI 保留字符的密码；自定义密码可调整模板中的 DSN 并进行 URI 编码。
+默认端口 8080、8081、8082，可通过 `CONFHUB_PORT/PORT2/PORT3` 修改。数据库通过本地目录挂载持久化：PostgreSQL 使用 `./data/postgres`，MySQL 使用 `./data/mysql`，启动时自动创建目录；`data/` 已被 Git 和 Docker 构建上下文忽略。已有命名卷的数据需先迁移到对应目录，不会自动复制。单个数据库容器不提供数据库 HA。默认 PostgreSQL 镜像为 `registry.cn-hangzhou.aliyuncs.com/bodesi/postgres:17`。模板将数据库密码放入 DSN，使用不包含 URI 保留字符的密码；自定义密码可调整模板中的 DSN 并进行 URI 编码。
 
 MySQL 使用 `docker compose -f compose.mysql.yaml …`，在 `.env` 中额外设置 `CONFHUB_DB_ROOT_PASSWORD`。本阶段按用户要求只运行 PostgreSQL 集成测试，MySQL 迁移/适配器尚未通过真实 MySQL 测试。
 
