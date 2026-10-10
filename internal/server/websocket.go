@@ -50,6 +50,7 @@ func (s *Server) watch(c *gin.Context) {
 		return
 	}
 	defer conn.Close()
+	session.Connected(c.Request.RemoteAddr)
 	slog.Info("client connected", "source_address", c.Request.RemoteAddr)
 	ctx, cancel := context.WithCancel(c.Request.Context())
 	defer cancel()
@@ -115,5 +116,6 @@ func (s *Server) writeSnapshots(ctx context.Context, conn *websocket.Conn, sessi
 		if err = conn.WriteJSON(value); err != nil {
 			return
 		}
+		session.Sent(value)
 	}
 }

@@ -11,7 +11,7 @@ export type Version = {
   created_at: string
   references?: string[]
 }
-export type Condition = { tag: string; operator: 'eq' | 'in'; values: string[] }
+export type Condition = { tag: string; operator: 'eq' | 'in' | 'ip_range'; values: string[] }
 export type GrayRule = {
   id: string
   name: string
@@ -55,3 +55,23 @@ export type Effective = {
   deleted: boolean
 }
 export type Draft = { content: string; format: Format; description: string; ruleId?: string }
+
+export type ClientSubscription = {
+  key: ConfigKey
+  id?: string
+  version: number
+  revision: number
+  rule_id?: string
+  deleted: boolean
+  sent: boolean
+}
+export type OnlineClient = {
+  id: string
+  instance_id: string
+  source_address: string
+  connected_at: string
+  refreshed_at: string
+  tags: Record<string, string>
+  subscriptions: ClientSubscription[]
+}
+export type ClientPage = { clients: OnlineClient[]; next_after?: string }

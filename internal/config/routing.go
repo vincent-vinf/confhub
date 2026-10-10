@@ -1,6 +1,9 @@
 package config
 
-import "fmt"
+import (
+	"fmt"
+	"net/netip"
+)
 
 // Resolve evaluates the same ordered rules for client reads and admin simulation.
 func Resolve(state *State, tags map[string]string) Effective {
@@ -15,7 +18,12 @@ func Resolve(state *State, tags map[string]string) Effective {
 		for _, condition := range rule.Conditions {
 			value, exists := tags[condition.Tag]
 			found := false
-			if exists {
+			if exists && condition.Operator == "ip_range" {
+				start, end, valid := ipRange(condition.Values)
+				ip, err := netip.ParseAddr(value)
+				ip = ip.Unmap()
+				found = valid && err == nil && ip.Zone() == "" && ip.BitLen() == start.BitLen() && ip.Compare(start) >= 0 && ip.Compare(end) <= 0
+			} else if exists {
 				for _, candidate := range condition.Values {
 					if value == candidate {
 						found = true
@@ -51,8 +59,13 @@ func ValidateRules(rules []Rule) error {
 			return fmt.Errorf("%w: rule name too long", ErrInvalid)
 		}
 		for _, c := range r.Conditions {
-			if c.Tag == "" || len(c.Tag) > 128 || len(c.Values) == 0 || len(c.Values) > 100 || (c.Operator != "eq" && c.Operator != "in") || (c.Operator == "eq" && len(c.Values) != 1) {
+			if c.Tag == "" || len(c.Tag) > 128 || len(c.Values) == 0 || len(c.Values) > 100 || (c.Operator != "eq" && c.Operator != "in" && c.Operator != "ip_range") || (c.Operator == "eq" && len(c.Values) != 1) {
 				return fmt.Errorf("%w: invalid tag condition", ErrInvalid)
+			}
+			if c.Operator == "ip_range" {
+				if _, _, ok := ipRange(c.Values); !ok {
+					return fmt.Errorf("%w: IP range requires two ordered addresses of the same family", ErrInvalid)
+				}
 			}
 			for _, value := range c.Values {
 				if len(value) > 512 {
@@ -73,4 +86,16 @@ func ValidateTags(tags map[string]string) error {
 		}
 	}
 	return nil
+}
+
+// IP ranges are inclusive, numeric, and contain unscoped addresses of one family.
+func ipRange(values []string) (netip.Addr, netip.Addr, bool) {
+	if len(values) != 2 {
+		return netip.Addr{}, netip.Addr{}, false
+	}
+	start, a := netip.ParseAddr(values[0])
+	end, b := netip.ParseAddr(values[1])
+	start = start.Unmap()
+	end = end.Unmap()
+	return start, end, a == nil && b == nil && start.Zone() == "" && end.Zone() == "" && start.BitLen() == end.BitLen() && start.Compare(end) <= 0
 }

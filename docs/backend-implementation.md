@@ -56,3 +56,15 @@ SDK 负责采集/覆盖 sys.ip、sys.hostname、自定义标签保留名检查�
 见 ADR 0006：schema 2 将每规则 beta 保存为独立可修改正文，来源编号不外键引用主历史；规则元数据 API 不接受正文或目标版本。灰度编辑只更新 beta 和配置修订；回退仅支持主历史，转全量通过 rule_id 读取事务内当前 beta。主历史清理不影响关闭中的 beta。旧 schema 1 不兼容，启动和 migrate 要求使用空数据库重建，不自动删除数据。
 
 通知及 Go/Python SDK 去重增加规则身份、正文及格式，既保证同名 beta 更新可见，又抑制无关规则、全量及描述变化。测试使用指定 PostgreSQL 镜像和隔离数据库；MySQL 仅维护相应 SQL，未运行真实 MySQL 测试。
+
+## IP 区间与在线连接（2026-10-10）
+
+新增 `ip_range` 并复用到配置读取、模拟与 WebSocket 路由。`net/netip` 校验完整起止地址、同族及数值顺序，包含端点；IPv4 映射 IPv6 统一处理，zone 不接受。
+
+presence worker 和配置同步 worker 独立运行。成功升级后记录临时连接身份，成功发送后更新无正文的订阅信息。共享数据库 lease、fingerprint 和标签索引支持多实例只读查询；只有变化客户端写入，插入/删除使用有大小上限的批次。过期查询过滤与后台物理清理分开，不参与配置 change stream 或 mutation 锁。schema 2 显式迁移至 3 保留配置；schema 1 拒绝兼容。
+
+验证覆盖真实 PostgreSQL 的事务、lease 过期、断连删除、去重/字面前缀/大小写/空格、建议上限及内置名称保留、schema 2 升级；HTTP/WebSocket 覆盖管理员权限、跨实例显示、版本更新、取消订阅及断连。指定 PostgreSQL 17 镜像用于所有数据库验证。MySQL 只提供迁移和适配器，按已确认边界不运行 MySQL 集成测试。
+
+审查补充：PostgreSQL 标签索引使用 BYTEA、MySQL 使用 VARBINARY，以保留合法 JSON 标签中的 NUL、大小写与空格；prefix 以二进制 LIKE 的字面转义查询，JSON 快照用 utf8mb4 存储。真实 PostgreSQL 回归验证特殊标签与普通连接可同时展示并查询，不能使实例续租失败。
+
+此次全量回归：`python3 sdk/test-integration.py --full` 通过（Go/Python 双实例 SDK、服务端 PostgreSQL race 与 vet）；审查修正后 presence/suggestions/迁移与跨实例客户端接口的针对性 race 回归通过。未执行压测。

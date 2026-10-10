@@ -35,6 +35,9 @@ const ConfigCreatePage = lazy(() =>
 const OrganizationPage = lazy(() =>
   import('./pages/organization').then((module) => ({ default: module.OrganizationPage })),
 )
+const ClientsPage = lazy(() =>
+  import('./pages/clients').then((module) => ({ default: module.ClientsPage })),
+)
 const SettingsPage = lazy(() =>
   import('./pages/settings').then((module) => ({ default: module.SettingsPage })),
 )
@@ -113,6 +116,14 @@ const router = createBrowserRouter([
         element: (
           <Suspense fallback={<Loading />}>
             <SettingsPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: '/clients',
+        element: (
+          <Suspense fallback={<Loading />}>
+            <ClientsPage />
           </Suspense>
         ),
       },

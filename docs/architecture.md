@@ -96,7 +96,7 @@ SDK 以原文快照和版本元数据为基础，提供获取、订阅、取消�
 
 应用事务读写通过数据库驱动与 SQL Adapter 封装两种后端差异。迁移使用 `github.com/golang-migrate/migrate/v4`，分别维护 PostgreSQL 和 MySQL 的版本化 SQL 来源；不用 ORM 自动改表，也不自行实现替代迁移框架。
 
-首次初始化可以在已经存在、可连接的空数据库上通过 migrate 创建表，然后初始化 admin 与默认组织数据；不会自动创建数据库、账号或权限。当前 schema 2 采用新的灰度模型；已存在的 schema 1 无论启动还是 migrate 都明确拒绝，需由使用者将 DSN 指向新的空数据库或自行重建，不实现旧配置兼容转换。应用不自动删除旧数据。后续支持的版本升级使用同一程序的 migrate 子命令。所有执行者连接同一实际写库，保持相同迁移表及锁配置，使用官方驱动的 session 锁；不能把多个独立可写 MySQL 节点视为一把共享锁。
+首次初始化可以在已经存在、可连接的空数据库上通过 migrate 创建表，然后初始化 admin 与默认组织数据；不会自动创建数据库、账号或权限。schema 2 采用新的灰度模型；当前 schema 3 在此基础上新增连接展示表，支持 schema 2 显式升级；已存在的 schema 1 无论启动还是 migrate 都明确拒绝，需由使用者将 DSN 指向新的空数据库或自行重建，不实现旧配置兼容转换。应用不自动删除旧数据。后续支持的版本升级使用同一程序的 migrate 子命令。所有执行者连接同一实际写库，保持相同迁移表及锁配置，使用官方驱动的 session 锁；不能把多个独立可写 MySQL 节点视为一把共享锁。
 
 使用独立迁移连接或连接池，避免 migrate.Close 关闭仍供业务使用的共享池。锁等待失败或迁移失败时不给出就绪状态；官方默认 schema_migrations 保存 version 和 dirty，不提供逐文件 checksum。dirty 表示未完成迁移，不能自动 Force 清除；先确认实际数据库状态并修复。MySQL 多条 DDL 可能部分完成，migrate 不会令其变为可整体事务回滚。
 
@@ -145,3 +145,13 @@ SDK 以原文快照和版本元数据为基础，提供获取、订阅、取消�
 - [asyncio 多线程](https://docs.python.org/3/library/asyncio-dev.html#concurrency-and-multithreading)、[task 调度](https://docs.python.org/3/library/asyncio-task.html)、[Runner](https://docs.python.org/3/library/asyncio-runner.html)：跨线程提交需线程安全调度，已有 event loop 内不能调用 asyncio.run。
 
 P99 不超过 300 ms 的目标范围是数据库事务提交到目标 SDK 获得新内容，包含跨实例传播和 SDK 调度，而不是仅测通知到达。当前尚未压测。
+
+## 在线连接展示与标签建议
+
+`syncer.Session` 在成功升级后生成连接 ID，记录连接时间和远端地址；写入成功后记录每个订阅的已发送元数据。`Hub.Clients` 复制标签和订阅，不复制配置正文；取消订阅清除已发送状态，关闭会话移除连接。显示的版本是服务器已发送状态，客户端没有应用确认协议。
+
+独立 presence worker 每 5 秒收集节点快照并使用数据库时钟续期 20 秒租约。`client_instances` 保存实例 lease，`connected_clients` 保存不含正文的 JSON 和 fingerprint，`client_tags` 提供按名称和值检索的索引。无变化只写 heartbeat，连接变化才在一个独立事务内更新记录和标签，断连删除。没有使用配置 mutation 锁、版本号或 change stream；展示失败不会中断配置发布与推送。过期实例查询不可见，每分钟最多清理 32 个实例并级联删除其临时记录。
+
+任意管理实例读取共享表即可分页列出全部有效节点的客户端，建议查询独立于客户端分页并按前缀去重限制为 100 项。标签名和值由客户端声明，仅用于灰度匹配和展示；以连接 ID 区分相同主机名的多个连接，source_address 与 sys.ip 分开。
+
+新增 schema 3 的表不修改配置数据；schema 2 部署显式运行 `confhub migrate` 后升级所有实例。schema 1 的灰度模型兼容策略保持拒绝。

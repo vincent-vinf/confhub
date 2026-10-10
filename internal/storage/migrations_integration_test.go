@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"gitlab.bodesitech.com/bodesi/confhub/internal/config"
 	"gitlab.bodesitech.com/bodesi/confhub/internal/storage"
 	"gitlab.bodesitech.com/bodesi/confhub/internal/testutil"
 )
@@ -74,5 +75,46 @@ func TestLegacySchemaRequiresExplicitDatabaseRecreation(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "recreate an empty database") {
 			t.Fatalf("legacy schema was accepted: %v", err)
 		}
+	}
+}
+
+func TestSchemaTwoRequiresExplicitPresenceUpgradeAndPreservesConfig(t *testing.T) {
+	dsn := testutil.Database(t)
+	if err := storage.Migrate("postgres", dsn, false); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	s, err := storage.Open(ctx, "postgres", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	k := config.Key{Namespace: "public", Group: "DEFAULT_GROUP", Name: "preserved"}
+	if _, err = s.Save(ctx, k, config.Edit{Content: "keep", Format: "text"}); err != nil {
+		t.Fatal(err)
+	}
+	setup, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer setup.Close()
+	// Model schema 2 without changing configuration tables or their data.
+	for _, q := range []string{"DROP TABLE client_tags", "DROP TABLE connected_clients", "DROP TABLE client_instances", "UPDATE schema_migrations SET version=2"} {
+		if _, err = setup.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = storage.Migrate("postgres", dsn, true); err == nil || !strings.Contains(err.Error(), "run confhub migrate") {
+		t.Fatal(err)
+	}
+	if err = storage.Migrate("postgres", dsn, false); err != nil {
+		t.Fatal(err)
+	}
+	current, _, err := s.Current(ctx, k)
+	if err != nil || current.Versions[1].Content != "keep" {
+		t.Fatal(current, err)
+	}
+	if _, err = s.Clients(ctx, "", 25); err != nil {
+		t.Fatal(err)
 	}
 }

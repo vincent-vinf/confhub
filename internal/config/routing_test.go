@@ -39,3 +39,32 @@ func TestGrayRuleValidationRejectsAmbiguousConditions(t *testing.T) {
 		}
 	}
 }
+
+func TestIPRangeIsInclusiveAndUsesAddressOrdering(t *testing.T) {
+	state := config.State{GlobalVersion: 1, Versions: map[int64]config.Version{1: {Content: "global"}}, Rules: []config.Rule{{ID: "ip", Enabled: true, Beta: config.Beta{BaseVersion: 1, Content: "beta"}, Conditions: []config.Condition{{Tag: "sys.ip", Operator: "ip_range", Values: []string{"192.168.2.1", "192.168.2.5"}}}}}}
+	if err := config.ValidateRules(state.Rules); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		ip    string
+		match bool
+	}{{"192.168.2.1", true}, {"192.168.2.3", true}, {"192.168.2.5", true}, {"192.168.2.0", false}, {"192.168.2.10", false}, {"host", false}, {"", false}} {
+		got := config.Resolve(&state, map[string]string{"sys.ip": tc.ip})
+		if (got.RuleID == "ip") != tc.match {
+			t.Errorf("%q: %+v", tc.ip, got)
+		}
+	}
+	for _, values := range [][]string{{"192.168.2.5", "192.168.2.1"}, {"192.168.2.1"}, {"bad", "192.168.2.5"}, {"192.168.2.1", "::1"}, {"fe80::1%eth0", "fe80::2%eth0"}} {
+		state.Rules[0].Conditions[0].Values = values
+		if config.ValidateRules(state.Rules) == nil {
+			t.Errorf("invalid range accepted: %v", values)
+		}
+	}
+	state.Rules[0].Conditions[0].Values = []string{"2001:db8::1", "2001:db8::5"}
+	if err := config.ValidateRules(state.Rules); err != nil {
+		t.Fatal(err)
+	}
+	if got := config.Resolve(&state, map[string]string{"sys.ip": "2001:db8::3"}); got.RuleID != "ip" {
+		t.Fatal(got)
+	}
+}

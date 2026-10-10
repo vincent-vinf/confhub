@@ -1,5 +1,6 @@
 import type {
   Baseline,
+  ClientPage,
   ConfigKey,
   ConfigState,
   ConfigSummary,
@@ -82,6 +83,12 @@ export const listUrl = (namespace = 'public', group = 'DEFAULT_GROUP') =>
 export const configQueryKey = (key: ConfigKey) =>
   ['config', key.namespace, key.group, key.name] as const
 export const api = {
+  clients: (after = '', signal?: AbortSignal) =>
+    request<ClientPage>(`${base}/clients?${new URLSearchParams({ after, limit: '25' })}`, {
+      signal,
+    }),
+  clientTags: (tag = '', prefix = '', signal?: AbortSignal) =>
+    request<string[]>(`${base}/client-tags?${new URLSearchParams({ tag, prefix })}`, { signal }),
   login: (username: string, password: string) =>
     request<{ username: string; expires_at: string }>(
       `${base}/login`,

@@ -14,6 +14,7 @@ import {
 import { api, ApiError, configQueryKey } from '../lib/api'
 import { baselineOf, ruleError, ruleId, targetVersion } from '../lib/config'
 import type { Condition, ConfigKey, ConfigState, Effective, GrayRule } from '../lib/types'
+import { TagInput } from '../components/tag-input'
 import { ChangeDialog, type ChangeAction } from '../components/change-dialog'
 import { Badge, Button, Confirmation, Empty, ErrorNotice, Loading, Modal } from '../components/ui'
 import { useDirty, useToast, usePending } from '../components/providers'
@@ -359,8 +360,18 @@ function RuleConditions({ rule }: { rule: GrayRule }) {
       {rule.conditions.map((condition, index) => (
         <span key={index}>
           <code>{condition.tag}</code>
-          <span>{condition.operator === 'eq' ? '＝' : '属于'}</span>
-          <strong>{condition.values.map((v) => (v === '' ? '空字符串' : v)).join(' / ')}</strong>
+          <span>
+            {condition.operator === 'eq'
+              ? '＝'
+              : condition.operator === 'ip_range'
+                ? 'IP 区间'
+                : '属于'}
+          </span>
+          <strong>
+            {condition.values
+              .map((v) => (v === '' ? '空字符串' : v))
+              .join(condition.operator === 'ip_range' ? ' → ' : ' / ')}
+          </strong>
           {index < rule.conditions.length - 1 && <small>AND</small>}
         </span>
       ))}
@@ -441,11 +452,11 @@ function RuleForm({ rule, onChange }: { rule: GrayRule; onChange: (rule: GrayRul
               <div className="form-grid">
                 <label>
                   标签名称
-                  <input
-                    aria-label={`条件 ${index + 1} 标签名称`}
+                  <TagInput
+                    label={`条件 ${index + 1} 标签名称`}
                     value={condition.tag}
-                    placeholder="例如 sys.hostname 或 env"
-                    onChange={(e) => updateCondition(index, { ...condition, tag: e.target.value })}
+                    placeholder="选择在线标签或自由填写"
+                    onChange={(tag) => updateCondition(index, { ...condition, tag })}
                   />
                 </label>
                 <label>
@@ -458,29 +469,58 @@ function RuleForm({ rule, onChange }: { rule: GrayRule; onChange: (rule: GrayRul
                         ...condition,
                         operator: e.target.value as Condition['operator'],
                         values:
-                          e.target.value === 'eq' ? [condition.values[0] ?? ''] : condition.values,
+                          e.target.value === 'eq'
+                            ? [condition.values[0] ?? '']
+                            : e.target.value === 'ip_range'
+                              ? [condition.values[0] ?? '', condition.values[1] ?? '']
+                              : condition.values,
+                        tag:
+                          !condition.tag && e.target.value === 'ip_range'
+                            ? 'sys.ip'
+                            : condition.tag,
                       })
                     }
                   >
                     <option value="eq">等于</option>
                     <option value="in">属于指定值集合</option>
+                    <option value="ip_range">IP 区间（含起止地址）</option>
                   </select>
                 </label>
               </div>
+              {condition.operator === 'ip_range' && (
+                <p className="section-help">
+                  填写完整 IPv4 或 IPv6 地址，包含起止地址；两个地址必须同族，起始不得大于结束。
+                </p>
+              )}
               <div className="condition-values">
                 {condition.values.map((value, valueIndex) => (
                   <div className="tag-value-row" key={valueIndex}>
                     <label>
-                      标签值{condition.values.length > 1 ? ` ${valueIndex + 1}` : ''}
-                      <input
-                        aria-label={`条件 ${index + 1} 标签值 ${valueIndex + 1}`}
+                      {condition.operator === 'ip_range'
+                        ? valueIndex === 0
+                          ? '起始 IP'
+                          : '结束 IP'
+                        : `标签值${condition.values.length > 1 ? ` ${valueIndex + 1}` : ''}`}
+                      <TagInput
+                        label={
+                          condition.operator === 'ip_range'
+                            ? `条件 ${index + 1} ${valueIndex === 0 ? '起始 IP' : '结束 IP'}`
+                            : `条件 ${index + 1} 标签值 ${valueIndex + 1}`
+                        }
+                        tag={condition.tag}
                         value={value}
-                        placeholder="例如 gray；空字符串也可作为值"
-                        onChange={(e) =>
+                        placeholder={
+                          condition.operator === 'ip_range'
+                            ? valueIndex === 0
+                              ? '192.168.2.1'
+                              : '192.168.2.5'
+                            : '选择在线值或自由填写（可为空）'
+                        }
+                        onChange={(nextValue) =>
                           updateCondition(index, {
                             ...condition,
                             values: condition.values.map((v, i) =>
-                              i === valueIndex ? e.target.value : v,
+                              i === valueIndex ? nextValue : v,
                             ),
                           })
                         }

@@ -1,6 +1,6 @@
 # ConfHub
 
-轻量配置中心，使用 Go/Gin、React、HTTP GET 与 WebSocket。支持不可变主版本、独立可覆盖的灰度 beta、全量回退、乐观锁、单 admin JWT 登录，以及 PostgreSQL/MySQL 存储。
+轻量配置中心，使用 Go/Gin、React、HTTP GET 与 WebSocket。支持不可变主版本、独立可覆盖的灰度 beta、全量回退、乐观锁、单 admin JWT 登录，以及 PostgreSQL/MySQL 存储。支持 IP 区间灰度、在线客户端只读查看和标签补全。
 
 需求与架构见 [docs/requirements.md](docs/requirements.md) 和 [docs/architecture.md](docs/architecture.md)，接口见 [docs/backend-api.md](docs/backend-api.md)，控制台交互和验证见 [docs/frontend-implementation.md](docs/frontend-implementation.md)。[Go/Python SDK](docs/sdk.md) 支持获取、订阅、自动重连和可选离线缓存。性能目标尚未压测。
 
@@ -16,7 +16,7 @@ make frontend-install frontend-build build
 ./bin/confhub --static-dir frontend/dist
 ```
 
-本次灰度简化使用 schema 2，不兼容旧 schema 1 数据。旧部署必须停止全部旧实例，将 DSN 指向新的空数据库（或由管理员确认无需保留数据后重建），再初始化新版本；所有实例和 Go/Python SDK 一起升级。服务启动和 migrate 都会拒绝旧 schema，不会自动删除旧数据；不能通过 Force 修改标记绕过。
+当前 schema 3：已使用独立 beta 的 schema 2 部署可运行 `./bin/confhub migrate` 升级，配置不变；无需重建数据库。灰度简化仍不兼容旧 schema 1 数据。旧部署必须停止全部旧实例，将 DSN 指向新的空数据库（或由管理员确认无需保留数据后重建），再初始化新版本；所有实例和 Go/Python SDK 一起升级。服务启动和 migrate 都会拒绝旧 schema，不会自动删除旧数据；不能通过 Force 修改标记绕过。
 
 后续支持的数据库升级使用同一二进制：
 

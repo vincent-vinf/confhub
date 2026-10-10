@@ -42,6 +42,8 @@ func New(store *storage.Store, hub *syncer.Hub, options Options) (*Server, error
 	a.POST("/password", s.password)
 	a.GET("/namespaces", func(c *gin.Context) { v, err := s.store.Namespaces(c.Request.Context()); s.respond(c, v, err) })
 	s.configRoutes(a)
+	a.GET("/clients", s.clients)
+	a.GET("/client-tags", s.clientTags)
 	r.GET("/api/client/config", s.clientGet)
 	r.GET("/api/client/watch", s.watch)
 	r.GET("/health/live", func(c *gin.Context) { c.Status(200) })

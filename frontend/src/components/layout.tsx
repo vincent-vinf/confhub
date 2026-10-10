@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   Layers3,
+  Monitor,
   Files,
   FolderTree,
   Settings2,
@@ -55,11 +56,13 @@ function Layout() {
     refetchOnWindowFocus: true,
   })
   useEffect(() => setMenu(false), [location.pathname, location.search])
-  const title = location.pathname.startsWith('/organization')
-    ? '命名空间'
-    : location.pathname.startsWith('/settings')
-      ? '账号设置'
-      : '配置管理'
+  const title = location.pathname.startsWith('/clients')
+    ? '在线客户端'
+    : location.pathname.startsWith('/organization')
+      ? '命名空间'
+      : location.pathname.startsWith('/settings')
+        ? '账号设置'
+        : '配置管理'
   const sidebar = (
     <>
       <a
@@ -89,6 +92,10 @@ function Layout() {
         <NavLink to="/organization">
           <FolderTree size={19} aria-hidden="true" />
           命名空间
+        </NavLink>
+        <NavLink to="/clients">
+          <Monitor size={19} aria-hidden="true" />
+          在线客户端
         </NavLink>
         <NavLink to="/settings">
           <Settings2 size={19} aria-hidden="true" />

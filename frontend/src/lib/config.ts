@@ -67,6 +67,18 @@ export function ruleError(rules: GrayRule[]) {
       if (!condition.values.length || condition.values.some((v) => bytes(v) > 512))
         return '请填写标签值，每个值最多 512 字节。'
       if (condition.values.length > 100) return '每个条件最多 100 个标签值。'
+      if (condition.operator === 'ip_range') {
+        const start = ipAddress(condition.values[0] ?? '')
+        const end = ipAddress(condition.values[1] ?? '')
+        if (
+          condition.values.length !== 2 ||
+          !start ||
+          !end ||
+          start.family !== end.family ||
+          start.number > end.number
+        )
+          return 'IP 区间必须填写两个完整的同族地址，起始 IP 不得大于结束 IP。'
+      }
       if (condition.operator === 'eq' && condition.values.length !== 1)
         return '等于条件只能有一个标签值。'
     }
@@ -90,4 +102,34 @@ export function ruleId() {
   const data = new Uint8Array(12)
   globalThis.crypto.getRandomValues(data)
   return `r-${Array.from(data, (b) => b.toString(16).padStart(2, '0')).join('')}`
+}
+
+// Convert strict IPv4 or browser-canonicalized IPv6 to numeric address order.
+function ipAddress(value: string): { family: number; number: bigint } | undefined {
+  if (!value.includes(':')) {
+    const parts = value.split('.')
+    if (
+      parts.length !== 4 ||
+      parts.some((part) => !/^(0|[1-9]\d{0,2})$/.test(part) || Number(part) > 255)
+    )
+      return
+    return { family: 4, number: parts.reduce((number, part) => (number << 8n) | BigInt(part), 0n) }
+  }
+  if (!/^[a-fA-F0-9:.]+$/.test(value)) return
+  if (value.includes('.') && !ipAddress(value.slice(value.lastIndexOf(':') + 1))) return
+  try {
+    const canonical = new URL(`http://[${value}]/`).hostname.slice(1, -1)
+    const [left, right] = canonical.split('::')
+    const a = left ? left.split(':') : []
+    const b = right ? right.split(':') : []
+    const groups = canonical.includes('::')
+      ? [...a, ...Array(8 - a.length - b.length).fill('0'), ...b]
+      : a
+    const number = groups.reduce((number, group) => (number << 16n) | BigInt(`0x${group}`), 0n)
+    return number >> 32n === 0xffffn
+      ? { family: 4, number: number & 0xffffffffn }
+      : { family: 6, number }
+  } catch {
+    return
+  }
 }

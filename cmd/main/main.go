@@ -58,8 +58,9 @@ func run() error {
 		return err
 	}
 	var workers sync.WaitGroup
-	workers.Add(2)
+	workers.Add(3)
 	go func() { defer workers.Done(); hub.Run(ctx) }()
+	go func() { defer workers.Done(); app.RunPresence(ctx) }()
 	go func() { defer workers.Done(); maintain(ctx, store, options) }()
 	httpServer := &http.Server{Addr: options.Listen, Handler: app.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 64 << 10}
 	result := make(chan error, 1)

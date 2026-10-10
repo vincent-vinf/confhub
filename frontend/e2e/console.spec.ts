@@ -646,3 +646,138 @@ test('新建灰度规则遇全量并发更新后确认最新创建来源', async
   s = await state(page.request, name)
   expect(s.rules[0].beta).toMatchObject({ base_version: 2, content: '{"v":2}' })
 })
+
+test('在线客户端只读展示、标签补全与 IP 区间规则', async ({ page }) => {
+  await login(page)
+  const name = 'ip-clients.json'
+  await save(page.request, name, '{"global":true}')
+  await page.evaluate(
+    ({ name }) => {
+      const client = new WebSocket(
+        `${location.origin.replace('http', 'ws')}/api/client/watch?tags=${encodeURIComponent(JSON.stringify({ env: 'canary', 'sys.ip': '192.168.2.3', 'sys.hostname': 'node-online' }))}`,
+      )
+      ;(window as unknown as { testClient: WebSocket }).testClient = client
+      client.onopen = () =>
+        client.send(
+          JSON.stringify({
+            op: 'subscribe',
+            key: { namespace: 'public', group: 'DEFAULT_GROUP', name },
+          }),
+        )
+    },
+    { name },
+  )
+  await page.getByRole('link', { name: '在线客户端', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '在线客户端', exact: true })).toBeVisible()
+  const card = page.getByTestId('client-card').filter({ hasText: 'node-online' })
+  await expect(card).toBeVisible({ timeout: 15000 })
+  await expect(card).toContainText('canary')
+  await expect(card).toContainText('v1')
+  await page.screenshot({ path: '../docs/images/frontend/clients-light.png', fullPage: true })
+  expect(
+    (await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze()).violations,
+  ).toEqual([])
+  // Preserve this connection while navigating: use the SPA link on its subscription.
+  await card.getByRole('link', { name }).click()
+  await page.getByRole('tab', { name: '灰度规则' }).click()
+  await page.getByRole('button', { name: '新增规则', exact: true }).click()
+  const tag = page.getByRole('combobox', { name: '条件 1 标签名称' })
+  await tag.fill('en')
+  await page.getByRole('option', { name: 'env', exact: true }).click()
+  const value = page.getByRole('combobox', { name: '条件 1 标签值 1' })
+  await value.fill('ca')
+  await page.getByRole('option', { name: 'canary', exact: true }).click()
+  await tag.fill('sys.i')
+  await tag.press('ArrowDown')
+  await tag.press('Enter')
+  await expect(tag).toHaveValue('sys.ip')
+  await page.getByLabel('条件 1 匹配方式').selectOption('ip_range')
+  await page.getByLabel('条件 1 起始 IP').fill('192.168.2.5')
+  await page.getByLabel('条件 1 结束 IP').fill('192.168.2.1')
+  await page.getByRole('button', { name: '查看影响并确认' }).click()
+  await expect(page.getByRole('alert')).toContainText('IP 区间')
+  await page.getByLabel('条件 1 起始 IP').fill('192.168.2.1')
+  await page.getByLabel('条件 1 结束 IP').fill('192.168.2.5')
+  await page.getByLabel('规则名称', { exact: true }).fill('IP 范围')
+  await page.getByRole('button', { name: '查看影响并确认' }).click()
+  await confirmRule(page)
+  const s = await state(page.request, name)
+  const condition = s.rules[0].conditions[0]
+  expect(condition).toEqual({
+    tag: 'sys.ip',
+    operator: 'ip_range',
+    values: ['192.168.2.1', '192.168.2.5'],
+  })
+  for (const [ip, match] of [
+    ['192.168.2.1', true],
+    ['192.168.2.5', true],
+    ['192.168.2.10', false],
+  ] as const) {
+    const r = await page.request.get(
+      `/api/client/config?name=${name}&tags=${encodeURIComponent(JSON.stringify({ 'sys.ip': ip }))}`,
+    )
+    expect((await r.json()).rule_id === s.rules[0].id).toBe(match)
+  }
+  await page.setViewportSize({ width: 375, height: 812 })
+  await page.getByRole('button', { name: '打开导航' }).click()
+  await page.getByRole('link', { name: '在线客户端', exact: true }).click()
+  await expect(card).toBeVisible()
+  await expect(card).toContainText('v1-beta', { timeout: 15000 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy()
+  await page.getByRole('button', { name: '切换深色主题' }).click()
+  await expect(page.getByRole('button', { name: '刷新', exact: true })).toHaveCSS(
+    'background-color',
+    'rgb(28, 43, 53)',
+  )
+  expect(
+    (await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze()).violations,
+  ).toEqual([])
+  await page.screenshot({ path: '../docs/images/frontend/clients-mobile-dark.png', fullPage: true })
+  await page.evaluate(() => (window as unknown as { testClient: WebSocket }).testClient.close())
+  await expect(card).not.toBeVisible({ timeout: 15000 })
+})
+
+test('长标签建议列表的键盘选中项保持可见', async ({ page }) => {
+  await login(page)
+  const name = 'keyboard-tags.json'
+  await save(page.request, name, '{"ok":true}')
+  await page.goto(url(name))
+  await page.evaluate(() => {
+    const tags: Record<string, string> = {}
+    for (let i = 1; i <= 30; i++) tags[`tag-${String(i).padStart(2, '0')}`] = 'value'
+    const client = new WebSocket(
+      `${location.origin.replace('http', 'ws')}/api/client/watch?tags=${encodeURIComponent(JSON.stringify(tags))}`,
+    )
+    ;(window as unknown as { testClient: WebSocket }).testClient = client
+  })
+  await page.getByRole('tab', { name: '灰度规则' }).click()
+  await page.getByRole('button', { name: '新增规则', exact: true }).click()
+  const input = page.getByRole('combobox', { name: '条件 1 标签名称' })
+  await input.fill('tag-')
+  // First request may precede the five-second presence sync; reopen to query again.
+  await expect
+    .poll(
+      async () => {
+        await input.blur()
+        await input.focus()
+        return page.getByRole('option', { name: 'tag-30', exact: true }).count()
+      },
+      { timeout: 15000, intervals: [1000] },
+    )
+    .toBe(1)
+  for (let i = 0; i < 30; i++) await input.press('ArrowDown')
+  const selected = page.getByRole('option', { name: 'tag-30', exact: true })
+  await expect(selected).toHaveAttribute('aria-selected', 'true')
+  const popup = page.locator('.tag-suggestion-popup')
+  await expect
+    .poll(async () => {
+      const a = await selected.boundingBox(),
+        b = await popup.boundingBox()
+      return !!a && !!b && a.y >= b.y && a.y + a.height <= b.y + b.height
+    })
+    .toBeTruthy()
+  await input.press('Enter')
+  await expect(input).toHaveValue('tag-30')
+  await expect(popup).not.toBeVisible()
+  await page.evaluate(() => (window as unknown as { testClient: WebSocket }).testClient.close())
+})

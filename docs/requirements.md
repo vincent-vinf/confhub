@@ -120,7 +120,7 @@
 
 - 服务端使用 Gin；前端使用 React、TypeScript、Vite、CodeMirror 6。
 - React 构建目录复制进同一个应用镜像，由 Go HTTP 服务直接提供，不嵌入 Go 可执行文件。
-- 使用 golang-migrate/migrate 管理 PostgreSQL、MySQL 的版本化迁移。此次灰度模型使用 schema 2，只支持空数据库初始化；不兼容 schema 1 配置数据，也不自动清除旧数据库。
+- 使用 golang-migrate/migrate 管理 PostgreSQL、MySQL 的版本化迁移。当前 schema 3 支持空数据库初始化和 schema 2 显式迁移；不兼容 schema 1 配置数据，也不自动清除旧数据库。
 - 提供 Docker Compose 部署；数据库持久化，多实例共享数据库和 JWT 签名密钥，SDK 可使用多个服务地址。
 
 ## 参考资料
@@ -129,3 +129,11 @@
 - [AgileConfig 官方说明](https://github.com/dotnetcore/AgileConfig/blob/master/README_CN.md)：配置组织、发布、回退、多节点及客户端缓存的参考。
 
 具体行为与约束以本文为基线，架构方案与重要取舍分别记录在 architecture.md 和 docs/adr/。
+
+## 在线连接与灰度匹配补充
+
+- 灰度支持 `eq/in/ip_range`。IP 区间包含起止地址，表单分别输入完整起始/结束 IP，支持 IPv4 和 IPv6，同族、无 zone，服务端校验数值顺序。
+- 提供仅展示的在线客户端页：WebSocket 连接、实例、远端地址、连接/快照时间、全部标签、订阅配置及已发送版本/规则/删除状态。HTTP GET 不计为在线；版本指服务器发送状态，非应用确认。
+- 多实例共享临时连接元数据，每 5 秒同步，节点 lease 20 秒，过期不展示。网页每 5 秒刷新；列表最终一致性独立于配置通知延迟目标。
+- 规则编辑自动补全标签名和值，建议从全部有效实例采集，始终建议内置名称，按前缀去重且限制 100 项；保留自由填写用于离线或未来客户端。
+- schema 3 新增临时连接表；schema 2 可显式迁移并保留配置，schema 1 不兼容。
