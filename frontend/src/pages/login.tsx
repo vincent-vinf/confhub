@@ -1,12 +1,13 @@
 import { useState, type FormEvent } from 'react'
 import { ArrowRight, Layers3, LockKeyhole } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from '../components/providers'
+import { useAuth, useNavigationPermit } from '../components/providers'
 import { Button, ErrorNotice, Modal } from '../components/ui'
 
 function LoginForm({ expired = false }: { expired?: boolean }) {
   const auth = useAuth()
   const navigate = useNavigate()
+  const [username, setUsername] = useState(auth.user?.username ?? 'admin')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<unknown>()
   const [busy, setBusy] = useState(false)
@@ -16,7 +17,7 @@ function LoginForm({ expired = false }: { expired?: boolean }) {
     setBusy(true)
     setError(undefined)
     try {
-      await auth.login(password)
+      await auth.login(username, password)
       setPassword('')
       if (!expired && ['/login', '/logout', '/'].includes(window.location.pathname))
         navigate('/configs', { replace: true })
@@ -30,7 +31,14 @@ function LoginForm({ expired = false }: { expired?: boolean }) {
     <form onSubmit={submit} className="form-stack">
       <label>
         用户名
-        <input name="username" autoComplete="username" value="admin" readOnly />
+        <input
+          name="username"
+          autoComplete="username"
+          value={username}
+          required
+          readOnly={expired}
+          onChange={(e) => setUsername(e.target.value)}
+        />
       </label>
       <label>
         密码
@@ -51,7 +59,7 @@ function LoginForm({ expired = false }: { expired?: boolean }) {
       <div id="login-error">
         <ErrorNotice error={error} />
       </div>
-      <Button type="submit" variant="primary" busy={busy} disabled={!password}>
+      <Button type="submit" variant="primary" busy={busy} disabled={!password || !username}>
         登录控制台 <ArrowRight size={18} aria-hidden="true" />
       </Button>
     </form>
@@ -90,6 +98,23 @@ export function LoginPage() {
 }
 export function Reauthenticate() {
   const auth = useAuth()
+  const navigate = useNavigate()
+  const permit = useNavigationPermit()
+  const [error, setError] = useState<unknown>()
+  const [busy, setBusy] = useState(false)
+  async function leave() {
+    setBusy(true)
+    setError(undefined)
+    try {
+      await auth.logout()
+      permit()
+      navigate('/login', { replace: true })
+    } catch (e) {
+      setError(e)
+    } finally {
+      setBusy(false)
+    }
+  }
   return (
     <Modal
       closable={false}
@@ -99,6 +124,10 @@ export function Reauthenticate() {
       onClose={() => {}}
     >
       <LoginForm expired />
+      <Button variant="ghost" busy={busy} onClick={leave}>
+        放弃编辑并退出
+      </Button>
+      <ErrorNotice error={error} />
     </Modal>
   )
 }

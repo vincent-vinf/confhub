@@ -2,6 +2,28 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { api, configPath, groupIndex, allVersions, request } from './api'
 
 afterEach(() => vi.unstubAllGlobals())
+it('审计筛选编码用户名、IP、时间并保留大整数游标', async () => {
+  const fetch = vi.fn().mockResolvedValue(new Response('{"audits":[]}'))
+  vi.stubGlobal('fetch', fetch)
+  await api.audits(
+    {
+      username: 'user + name',
+      ip: '::1',
+      action: 'config.publish',
+      result: 'failure',
+      from: '2026-10-12T12:00:00+08:00',
+      to: '',
+    },
+    '9007199254740993',
+  )
+  const params = new URL(String(fetch.mock.calls[0][0]), 'http://localhost').searchParams
+  expect(params.get('username')).toBe('user + name')
+  expect(params.get('ip')).toBe('::1')
+  expect(params.get('from')).toBe('2026-10-12T12:00:00+08:00')
+  expect(params.get('before')).toBe('9007199254740993')
+  expect(params.get('limit')).toBe('25')
+  expect(params.get('to')).toBe('')
+})
 it('配置路径编码中文及特殊字符', () => {
   expect(configPath({ namespace: '中文', group: 'a b', name: 'a?#.yaml' })).toBe(
     '/api/admin/namespaces/%E4%B8%AD%E6%96%87/groups/a%20b/configs/a%3F%23.yaml',
@@ -71,4 +93,23 @@ it('目标同名冲突明确提示整批移动未执行', async () => {
   await expect(api.batchMove([], 'target', 'apps')).rejects.toThrow(
     '目标分组已存在同名配置，整批移动未执行',
   )
+})
+
+it('权限不足与同源校验失败分别提示，权限不足不触发重新登录', async () => {
+  const expired = vi.fn()
+  window.addEventListener('confhub:unauthorized', expired)
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue(new Response('{"error":"permission denied"}', { status: 403 })),
+  )
+  await expect(api.namespaces()).rejects.toThrow('你没有执行此操作的权限')
+  expect(expired).not.toHaveBeenCalled()
+  vi.stubGlobal(
+    'fetch',
+    vi
+      .fn()
+      .mockResolvedValue(new Response('{"error":"same-origin request required"}', { status: 403 })),
+  )
+  await expect(api.namespaces()).rejects.toThrow('请求来源校验失败')
+  window.removeEventListener('confhub:unauthorized', expired)
 })

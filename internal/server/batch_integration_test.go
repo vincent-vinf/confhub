@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
 	"github.com/vincent-vinf/confhub/internal/config"
 	"github.com/vincent-vinf/confhub/internal/server"
@@ -77,10 +76,7 @@ func TestBatchEndpointsProtectMutationsAndNotifyOtherReplica(t *testing.T) {
 			t.Fatal("initial watch", initial)
 		}
 	}
-	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.RegisteredClaims{Subject: "admin", Issuer: "confhub", ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour))}).SignedString([]byte(secret))
-	if err != nil {
-		t.Fatal(err)
-	}
+	token := adminToken(t, store, secret)
 	post := func(path string, body any, authenticated bool, origin string, want int) {
 		t.Helper()
 		raw, _ := json.Marshal(body)

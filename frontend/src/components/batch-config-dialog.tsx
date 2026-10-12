@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { FolderInput, Trash2 } from 'lucide-react'
+import { allows } from '../lib/permissions'
 import { api, ApiError } from '../lib/api'
 import type { ConfigSummary } from '../lib/types'
 import { Select } from './select'
-import { usePending, useToast } from './providers'
+import { usePending, useToast, useAuth } from './providers'
 import { Button, Confirmation, ErrorNotice, Modal } from './ui'
 
 export function BatchConfigDialog({
@@ -18,6 +19,7 @@ export function BatchConfigDialog({
   onClose: () => void
   onSuccess: () => void
 }) {
+  const { user } = useAuth()
   const moving = action === 'move'
   const [namespace, setNamespace] = useState(configs[0].key.namespace)
   const [group, setGroup] = useState('')
@@ -39,6 +41,7 @@ export function BatchConfigDialog({
   const canSubmit = moving
     ? namespaces.data?.includes(namespace) &&
       groups.data?.includes(group) &&
+      allows(user, 'config.write', namespace, group) &&
       configs.every((item) => item.key.namespace !== namespace || item.key.group !== group)
     : confirmed
   usePending(moving ? '正在移动配置' : '正在删除配置', busy)
@@ -129,9 +132,11 @@ export function BatchConfigDialog({
                 setError(undefined)
               }}
             >
-              {namespaces.data?.map((name) => (
-                <option key={name}>{name}</option>
-              ))}
+              {namespaces.data
+                ?.filter((n) => allows(user, 'config.write', n))
+                .map((name) => (
+                  <option key={name}>{name}</option>
+                ))}
             </Select>
           </label>
           <ErrorNotice error={namespaces.error} onRetry={() => namespaces.refetch()} />
@@ -153,16 +158,18 @@ export function BatchConfigDialog({
                     ? '请选择分组'
                     : '暂无分组'}
               </option>
-              {groups.data?.map((name) => (
-                <option
-                  key={name}
-                  disabled={configs.some(
-                    (item) => item.key.namespace === namespace && item.key.group === name,
-                  )}
-                >
-                  {name}
-                </option>
-              ))}
+              {groups.data
+                ?.filter((g) => allows(user, 'config.write', namespace, g))
+                .map((name) => (
+                  <option
+                    key={name}
+                    disabled={configs.some(
+                      (item) => item.key.namespace === namespace && item.key.group === name,
+                    )}
+                  >
+                    {name}
+                  </option>
+                ))}
             </Select>
           </label>
           <ErrorNotice error={groups.error} onRetry={() => groups.refetch()} />

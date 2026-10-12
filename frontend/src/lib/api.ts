@@ -1,4 +1,8 @@
 import type {
+  AuditFilter,
+  AuditPage,
+  User,
+  UserInput,
   Baseline,
   ClientPage,
   ConfigKey,
@@ -23,7 +27,10 @@ export class ApiError extends Error {
 }
 const friendlyError = (status: number, serverMessage?: string) => {
   if (status === 401) return '登录已过期，请重新登录。你的编辑内容会保留。'
-  if (status === 403) return '请求来源校验失败，请使用与服务相同的访问地址。'
+  if (status === 403)
+    return serverMessage === 'same-origin request required'
+      ? '请求来源校验失败，请使用与服务相同的访问地址。'
+      : '你没有执行此操作的权限。'
   if (status === 409 && serverMessage?.includes('destination already contains configuration'))
     return '目标分组已存在同名配置，整批移动未执行。请更换目标分组。'
   if (status === 409) return '配置已被其他人修改，请读取最新版本后重新比较。'
@@ -85,6 +92,31 @@ export const listUrl = (namespace = 'public', group = 'DEFAULT_GROUP') =>
 export const configQueryKey = (key: ConfigKey) =>
   ['config', key.namespace, key.group, key.name] as const
 export const api = {
+  audits: (filter: AuditFilter, before = '', signal?: AbortSignal) =>
+    request<AuditPage>(
+      `${base}/audits?${new URLSearchParams({ ...filter, before, limit: '25' })}`,
+      { signal },
+    ),
+  me: (signal?: AbortSignal) => request<User>(`${base}/me`, { signal }),
+  users: (after = '', signal?: AbortSignal) =>
+    request<User[]>(`${base}/users?${new URLSearchParams({ after, limit: '25' })}`, { signal }),
+  createUser: (username: string, password: string, input: UserInput) =>
+    request<User>(`${base}/users`, body('POST', { username, password, ...input })),
+  updateUser: (user: User, input: UserInput) =>
+    request<User>(
+      `${base}/users/${part(user.id)}`,
+      body('PUT', { ...input, expected_revision: user.revision, confirmed: true }),
+    ),
+  deleteUser: (user: User) =>
+    request(
+      `${base}/users/${part(user.id)}`,
+      body('DELETE', { expected_revision: user.revision, confirmed: true }),
+    ),
+  resetPassword: (user: User, password: string) =>
+    request(
+      `${base}/users/${part(user.id)}/password`,
+      body('POST', { password, expected_revision: user.revision, confirmed: true }),
+    ),
   clients: (after = '', signal?: AbortSignal) =>
     request<ClientPage>(`${base}/clients?${new URLSearchParams({ after, limit: '25' })}`, {
       signal,

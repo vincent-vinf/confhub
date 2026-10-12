@@ -52,6 +52,7 @@ func (s *Server) configRoutes(a *gin.RouterGroup) {
 		if !bind(c, &b) {
 			return
 		}
+		auditDetails(c, b.Name, nil)
 		err := s.store.CreateNamespace(c.Request.Context(), b.Name)
 		s.respond(c, gin.H{"name": b.Name}, err)
 	})
@@ -64,10 +65,7 @@ func (s *Server) configRoutes(a *gin.RouterGroup) {
 		}
 		s.respond(c, gin.H{"deleted": true}, s.store.DeleteNamespace(c.Request.Context(), c.Param("namespace")))
 	})
-	a.GET("/namespaces/:namespace/groups", func(c *gin.Context) {
-		v, err := s.store.Groups(c.Request.Context(), c.Param("namespace"))
-		s.respond(c, v, err)
-	})
+	a.GET("/namespaces/:namespace/groups", s.groups)
 	a.POST("/namespaces/:namespace/groups", func(c *gin.Context) {
 		var b struct {
 			Name string `json:"name"`
@@ -75,6 +73,7 @@ func (s *Server) configRoutes(a *gin.RouterGroup) {
 		if !bind(c, &b) {
 			return
 		}
+		auditDetails(c, c.Param("namespace")+" / "+b.Name, nil)
 		err := s.store.CreateGroup(c.Request.Context(), c.Param("namespace"), b.Name)
 		s.respond(c, gin.H{"name": b.Name}, err)
 	})
@@ -99,6 +98,9 @@ func (s *Server) configRoutes(a *gin.RouterGroup) {
 	})
 	a.GET(base+"/:name", func(c *gin.Context) {
 		v, err := s.store.Snapshot(c.Request.Context(), pathKey(c))
+		if err == nil {
+			auditDetails(c, "", map[string]any{"config_id": v.ID, "global_version": v.GlobalVersion})
+		}
 		s.respond(c, v, err)
 	})
 	a.PUT(base+"/:name", func(c *gin.Context) {
@@ -106,6 +108,12 @@ func (s *Server) configRoutes(a *gin.RouterGroup) {
 		if !bindStrict(c, &b) || !confirm(c, b.Confirmed) {
 			return
 		}
+		if b.Target == "beta" {
+			if a := auditRecord(c); a != nil {
+				a.Action = "config.beta.save"
+			}
+		}
+		auditDetails(c, "", map[string]any{"format": b.Format, "target": b.Target})
 		m, err := s.store.Save(c.Request.Context(), pathKey(c), b.Edit)
 		s.mutated(c, "save", m, err)
 	})
@@ -126,6 +134,11 @@ func (s *Server) configRoutes(a *gin.RouterGroup) {
 		if !bindStrict(c, &b) || !confirm(c, b.Confirmed) {
 			return
 		}
+		rules := make([]map[string]any, 0, min(len(b.Rules), 100))
+		for _, rule := range b.Rules[:min(len(b.Rules), 100)] {
+			rules = append(rules, map[string]any{"id": auditText(rule.ID, 36), "name": auditText(rule.Name, 128), "enabled": rule.Enabled, "condition_count": len(rule.Conditions)})
+		}
+		auditDetails(c, "", map[string]any{"rules": rules, "rule_count": len(b.Rules), "source_version": b.Source})
 		m, err := s.store.SetRules(c.Request.Context(), pathKey(c), b.ExpectedID, b.ExpectedRevision, b.Rules, b.Source)
 		s.mutated(c, "rules", m, err)
 	})
@@ -167,6 +180,7 @@ func (s *Server) configRoutes(a *gin.RouterGroup) {
 			s.respond(c, nil, fmt.Errorf("%w: invalid version", config.ErrInvalid))
 			return
 		}
+		auditDetails(c, "", map[string]any{"version": number})
 		v, err := s.store.Version(c.Request.Context(), pathKey(c), number)
 		s.respond(c, v, err)
 	})
@@ -183,17 +197,35 @@ func (s *Server) configRoutes(a *gin.RouterGroup) {
 			if action == "promote" {
 				target = "beta"
 			}
+			auditDetails(c, "", map[string]any{"source_version": b.Source})
 			m, err := s.store.CopyVersion(c.Request.Context(), pathKey(c), b.ExpectedID, b.ExpectedRevision, b.Source, target, action == "rollback")
 			s.mutated(c, action, m, err)
 		})
 	}
 }
 func (s *Server) mutated(c *gin.Context, action string, m config.Mutation, err error) {
+	if err == nil {
+		if a := auditRecord(c); a != nil {
+			var details map[string]any
+			if len(a.Details) > 0 {
+				_ = json.Unmarshal(a.Details, &details)
+			}
+			if details == nil {
+				details = map[string]any{}
+			}
+			details["changed"] = m.Changed
+			if m.State != nil {
+				details["config_id"] = m.State.ID
+				details["global_version"] = m.State.GlobalVersion
+			}
+			auditDetails(c, "", details)
+		}
+	}
 	if err == nil && m.Changed {
 		if s.hub != nil {
 			s.hub.Wake()
 		}
-		slog.Info("configuration changed", "action", action, "id", m.State.ID, "key", m.State.Key, "revision", m.State.Revision, "sequence", m.Sequence)
+		slog.Info("configuration changed", "user_id", currentUser(c).ID, "action", action, "id", m.State.ID, "key", m.State.Key, "revision", m.State.Revision, "sequence", m.Sequence)
 	}
 	s.respond(c, m, err)
 }

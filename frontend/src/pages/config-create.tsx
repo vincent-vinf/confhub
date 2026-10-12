@@ -3,6 +3,7 @@ import { useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, FilePlus2, Save, WandSparkles } from 'lucide-react'
+import { allows } from '../lib/permissions'
 import { api, configUrl, listUrl } from '../lib/api'
 import { bytes, nameError } from '../lib/config'
 import { formatContent, validateContent } from '../lib/format'
@@ -10,9 +11,10 @@ import { formats, type Draft } from '../lib/types'
 import { CodeEditor, type EditorHandle } from '../components/editor'
 import { ChangeDialog } from '../components/change-dialog'
 import { Button, ErrorNotice } from '../components/ui'
-import { useDirty, useToast, useNavigationPermit } from '../components/providers'
+import { useDirty, useToast, useNavigationPermit, useAuth } from '../components/providers'
 
 export function ConfigCreatePage() {
+  const { user } = useAuth()
   const permit = useNavigationPermit()
   const [params] = useSearchParams()
   const navigate = useNavigate()
@@ -40,6 +42,10 @@ export function ConfigCreatePage() {
   useDirty('新建配置的未保存内容', !published && (!!name || !!draft.content || !!draft.description))
   async function prepare() {
     if (busy) return
+    if (!allows(user, 'config.write', namespace, group)) {
+      setError('你没有此分组的写入权限。')
+      return
+    }
     const invalidName = nameError(name)
     if (invalidName) {
       setError(invalidName)
@@ -90,6 +96,8 @@ export function ConfigCreatePage() {
       setFormatting(false)
     }
   }
+  if (!allows(user, 'config.write', namespace, group))
+    return <ErrorNotice error="你没有此分组的写入权限，请从可写分组的配置列表新建配置。" />
   return (
     <>
       <div className="detail-breadcrumb">
@@ -118,18 +126,22 @@ export function ConfigCreatePage() {
                 setGroup('')
               }}
             >
-              {namespaces.data?.map((n) => (
-                <option key={n}>{n}</option>
-              ))}
+              {namespaces.data
+                ?.filter((n) => allows(user, 'config.write', n))
+                .map((n) => (
+                  <option key={n}>{n}</option>
+                ))}
             </Select>
           </label>
           <label>
             分组
             <Select aria-label="分组" value={group} onValueChange={(value) => setGroup(value)}>
               <option value="">选择分组</option>
-              {groups.data?.map((g) => (
-                <option key={g}>{g}</option>
-              ))}
+              {groups.data
+                ?.filter((g) => allows(user, 'config.write', namespace, g))
+                .map((g) => (
+                  <option key={g}>{g}</option>
+                ))}
             </Select>
           </label>
           <label>

@@ -1,0 +1,4 @@
+CREATE TABLE users (id VARCHAR(36) PRIMARY KEY, username VARCHAR(64) NOT NULL UNIQUE, password_hash VARCHAR(128) NOT NULL, enabled BOOLEAN NOT NULL, system_admin BOOLEAN NOT NULL, clients_read BOOLEAN NOT NULL, auth_version BIGINT NOT NULL, revision BIGINT NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+CREATE TABLE user_grants (user_id VARCHAR(36) NOT NULL, namespace VARCHAR(128) NOT NULL, group_name VARCHAR(128) NOT NULL, access VARCHAR(8) NOT NULL, PRIMARY KEY(user_id, namespace, group_name), FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+INSERT INTO users (id,username,password_hash,enabled,system_admin,clients_read,auth_version,revision) SELECT '00000000-0000-4000-8000-000000000001','admin',password_hash,TRUE,TRUE,FALSE,1,1 FROM admin WHERE id=1;
+DROP TABLE admin;

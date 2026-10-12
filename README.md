@@ -1,6 +1,6 @@
 # ConfHub
 
-轻量配置中心，使用 Go/Gin、React、HTTP GET 与 WebSocket。支持不可变主版本、配置级唯一可覆盖的灰度 beta、全量回退、乐观锁、单 admin JWT 登录，以及 PostgreSQL/MySQL 存储。支持 IP 区间灰度、在线客户端只读查看和标签补全。
+轻量配置中心，使用 Go/Gin、React、HTTP GET 与 WebSocket。支持不可变主版本、配置级唯一可覆盖的灰度 beta、全量回退、乐观锁、多用户 JWT 登录和 namespace/group 读写授权，以及 PostgreSQL/MySQL 存储。支持 IP 区间灰度、在线客户端只读查看、标签补全和操作审计。
 
 需求与架构见 [docs/requirements.md](docs/requirements.md) 和 [docs/architecture.md](docs/architecture.md)，接口见 [docs/backend-api.md](docs/backend-api.md)，控制台交互和验证见 [docs/frontend-implementation.md](docs/frontend-implementation.md)。[Go/Python SDK](docs/sdk.md) 支持获取、订阅、自动重连和可选离线缓存。性能目标尚未压测。
 
@@ -16,9 +16,11 @@ make frontend-install frontend-build build
 ./bin/confhub --static-dir frontend/dist
 ```
 
-当前 schema 4：不兼容旧 schema 1/2/3 数据。旧部署需停止全部旧实例，将 DSN 指向新的空数据库（或由管理员重建）再初始化；所有实例和 Go/Python SDK 一起升级。启动和 migrate 均拒绝旧 schema，不会自动删除旧数据，不能通过 Force 修改标记绕过。
+当前 schema 6。已有 schema 4/5 可保留 admin 密码及配置数据升级：停止旧实例，使用新二进制执行下方迁移命令，再启动新实例；从 schema 4 升级需重新登录。schema 1/2/3 仍不兼容，需按此前策略使用空数据库重建，不能通过 Force 修改标记绕过。
 
-后续支持的数据库升级使用同一二进制：
+管理员通过“用户管理”创建账号并授予只读或读写权限，支持整个命名空间或指定分组。在线客户端查看单独授权。权限覆盖控制台和管理 API，SDK 的 HTTP GET/WebSocket 仍无需鉴权。详见 [多用户与权限](docs/users-permissions.md)。系统管理员可在“操作审计”查看管理操作并按用户、IP、操作、结果及时间筛选，见 [审计说明](docs/audit.md)。
+
+数据库升级使用同一二进制：
 
 ```sh
 ./bin/confhub migrate

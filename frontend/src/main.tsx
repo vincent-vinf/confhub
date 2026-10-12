@@ -38,6 +38,12 @@ const OrganizationPage = lazy(() =>
 const ClientsPage = lazy(() =>
   import('./pages/clients').then((module) => ({ default: module.ClientsPage })),
 )
+const AuditsPage = lazy(() =>
+  import('./pages/audits').then((module) => ({ default: module.AuditsPage })),
+)
+const UsersPage = lazy(() =>
+  import('./pages/users').then((module) => ({ default: module.UsersPage })),
+)
 const SettingsPage = lazy(() =>
   import('./pages/settings').then((module) => ({ default: module.SettingsPage })),
 )
@@ -124,6 +130,22 @@ const router = createBrowserRouter([
         element: (
           <Suspense fallback={<Loading />}>
             <ClientsPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: '/users',
+        element: (
+          <Suspense fallback={<Loading />}>
+            <UsersPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: '/audits',
+        element: (
+          <Suspense fallback={<Loading />}>
+            <AuditsPage />
           </Suspense>
         ),
       },

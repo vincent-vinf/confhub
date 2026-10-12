@@ -18,7 +18,7 @@ import type { Condition, ConfigKey, ConfigState, Effective, GrayRule } from '../
 import { TagInput } from '../components/tag-input'
 import { ChangeDialog, type ChangeAction } from '../components/change-dialog'
 import { Badge, Button, Confirmation, Empty, ErrorNotice, Modal } from '../components/ui'
-import { useDirty, useToast, usePending } from '../components/providers'
+import { useDirty, useToast, usePending, usePermission } from '../components/providers'
 
 export function RulesPanel({
   configKey,
@@ -31,6 +31,7 @@ export function RulesPanel({
   onStateChanged: (state: ConfigState) => void
   onEditBeta: () => void
 }) {
+  const writable = usePermission('config.write', configKey.namespace, configKey.group)
   const toast = useToast()
   const client = useQueryClient()
   const [editing, setEditing] = useState<GrayRule>()
@@ -204,6 +205,7 @@ export function RulesPanel({
             </div>
           </div>
           <Button
+            hidden={!writable}
             variant="primary"
             disabled={state.rules.length >= 100}
             onClick={() => startEdit()}
@@ -221,6 +223,7 @@ export function RulesPanel({
                   <span>{String(index + 1).padStart(2, '0')}</span>
                   <div>
                     <Button
+                      hidden={!writable}
                       variant="ghost"
                       className="icon-button"
                       aria-label={`上移规则 ${rule.name || rule.id}`}
@@ -230,6 +233,7 @@ export function RulesPanel({
                       <ArrowUp size={15} aria-hidden="true" />
                     </Button>
                     <Button
+                      hidden={!writable}
                       variant="ghost"
                       className="icon-button"
                       aria-label={`下移规则 ${rule.name || rule.id}`}
@@ -251,6 +255,7 @@ export function RulesPanel({
                 </div>
                 <div className="rule-actions">
                   <Button
+                    hidden={!writable}
                     variant="ghost"
                     className="icon-button"
                     aria-label={`修改规则 ${rule.name || rule.id}`}
@@ -259,6 +264,7 @@ export function RulesPanel({
                     <Pencil size={17} aria-hidden="true" />
                   </Button>
                   <Button
+                    hidden={!writable}
                     variant="ghost"
                     className={`icon-button ${rule.enabled ? 'destructive-text' : 'success-text'}`}
                     aria-label={`${rule.enabled ? '停用' : '启用'}规则 ${rule.name || rule.id}`}
@@ -274,6 +280,7 @@ export function RulesPanel({
                     <Power size={17} aria-hidden="true" />
                   </Button>
                   <Button
+                    hidden={!writable}
                     variant="ghost"
                     className="icon-button destructive-text"
                     aria-label={`删除规则 ${rule.name || rule.id}`}
@@ -303,17 +310,19 @@ export function RulesPanel({
               </div>
             </div>
             <div className="button-row">
-              <Button onClick={onEditBeta}>
+              <Button hidden={!writable} onClick={onEditBeta}>
                 <Pencil size={15} aria-hidden="true" />
                 编辑配置
               </Button>
-              <Button onClick={promote}>转为全量</Button>
+              <Button hidden={!writable} onClick={promote}>
+                转为全量
+              </Button>
             </div>
           </div>
         </section>
       )}
       <Simulation configKey={configKey} state={state} />
-      {editing && !pending && (
+      {writable && editing && !pending && (
         <Modal
           open
           onClose={() => setEditing(undefined)}
@@ -321,8 +330,10 @@ export function RulesPanel({
           wide
           footer={
             <>
-              <Button onClick={() => setEditing(undefined)}>取消</Button>
-              <Button variant="primary" onClick={reviewEdit}>
+              <Button hidden={!writable} onClick={() => setEditing(undefined)}>
+                取消
+              </Button>
+              <Button hidden={!writable} variant="primary" onClick={reviewEdit}>
                 查看影响并确认
               </Button>
             </>
@@ -353,7 +364,7 @@ export function RulesPanel({
           <ErrorNotice error={error} />
         </Modal>
       )}
-      {pending && (
+      {writable && pending && (
         <Modal
           open
           onClose={() => {
@@ -365,10 +376,11 @@ export function RulesPanel({
           busy={busy}
           footer={
             <>
-              <Button onClick={() => setPending(undefined)} disabled={busy}>
+              <Button hidden={!writable} onClick={() => setPending(undefined)} disabled={busy}>
                 {editing ? '返回编辑' : '取消'}
               </Button>
               <Button
+                hidden={!writable}
                 variant="primary"
                 onClick={commit}
                 busy={busy}
@@ -401,7 +413,7 @@ export function RulesPanel({
           </div>
           <ErrorNotice error={error} />
           {error instanceof ApiError && error.status === 409 && (
-            <Button onClick={conflictReload} busy={busy}>
+            <Button hidden={!writable} onClick={conflictReload} busy={busy}>
               读取最新规则并保留当前编辑
             </Button>
           )}
@@ -412,7 +424,7 @@ export function RulesPanel({
           />
         </Modal>
       )}
-      {action && (
+      {writable && action && (
         <ChangeDialog
           configKey={configKey}
           baseline={state}

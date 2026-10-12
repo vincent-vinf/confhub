@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { usePermission } from './providers'
 import { api } from '../lib/api'
 
 // Suggestions never constrain freeform tags, including future/offline clients.
@@ -16,6 +17,7 @@ export function TagInput({
   tag?: string
   placeholder?: string
 }) {
+  const canReadClients = usePermission('clients.read')
   const isName = tag === undefined
   const id = useId()
   const popup = useRef<HTMLDivElement>(null)
@@ -29,14 +31,14 @@ export function TagInput({
   const query = useQuery({
     queryKey: ['client-tags', tag, prefix],
     queryFn: ({ signal }) => api.clientTags(tag, prefix, signal),
-    enabled: open && (isName || !!tag),
+    enabled: canReadClients && open && (isName || !!tag),
     staleTime: 5000,
     gcTime: 60000,
   })
   const suggestions = [
     ...new Set([
       ...(isName ? ['sys.ip', 'sys.hostname'] : []),
-      ...(isName || tag ? (query.data ?? []) : []),
+      ...(isName || tag ? (canReadClients ? (query.data ?? []) : []) : []),
     ]),
   ]
     .filter((item) => item.startsWith(value))

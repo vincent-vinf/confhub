@@ -17,12 +17,15 @@ import {
 import { api, configUrl, groupIndex } from '../lib/api'
 import { Badge, Button, Empty, ErrorNotice, Loading } from '../components/ui'
 import { BatchConfigDialog } from '../components/batch-config-dialog'
+import { usePermission } from '../components/providers'
 import type { ConfigSummary } from '../lib/types'
 
 export function ConfigListPage() {
   const [params, setParams] = useSearchParams()
   const namespace = params.get('namespace') ?? 'public',
     group = params.get('group') ?? 'DEFAULT_GROUP'
+  const writable = usePermission('config.write', namespace, group)
+  const manage = usePermission('organization.manage')
   const [search, setSearch] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [cursors, setCursors] = useState([''])
@@ -36,6 +39,7 @@ export function ConfigListPage() {
   const groups = useQuery({
     queryKey: ['groups', namespace],
     queryFn: ({ signal }) => api.groups(namespace, signal),
+    enabled: namespaces.data?.includes(namespace) === true,
   })
   const listing = useQuery({
     queryKey: ['configs', namespace, group, cursors.at(-1)],
@@ -73,13 +77,20 @@ export function ConfigListPage() {
   const pageNumber = searchQuery ? searchPage + 1 : cursors.length
   useEffect(() => {
     setSelected([])
-  }, [namespace, group, searchQuery, searchPage, pageNumber])
+  }, [namespace, group, searchQuery, searchPage, pageNumber, writable])
   const scopeError =
     namespaces.data && !namespaces.data.includes(namespace)
-      ? '命名空间不存在，请选择其他命名空间。'
+      ? '此命名空间不可访问，请选择有权限的命名空间。'
       : groups.data && !groups.data.includes(group)
-        ? '此命名空间没有选中的分组，请选择或创建分组。'
+        ? '此分组不可访问，请选择有权限的分组。'
         : undefined
+  useEffect(() => {
+    if (namespaces.data?.length && !params.has('namespace'))
+      setParams(
+        { namespace: namespaces.data.includes('public') ? 'public' : namespaces.data[0] },
+        { replace: true },
+      )
+  }, [namespaces.data, params, setParams])
   useEffect(() => {
     if (groups.data?.length && !params.has('group'))
       setParams(
@@ -99,17 +110,19 @@ export function ConfigListPage() {
         <div>
           <h1>配置管理</h1>
         </div>
-        <Link
-          className="button primary"
-          to={`/new?${new URLSearchParams({ namespace, group })}`}
-          aria-disabled={!!scopeError}
-          onClick={(event) => {
-            if (scopeError) event.preventDefault()
-          }}
-        >
-          <Plus size={18} aria-hidden="true" />
-          新建配置
-        </Link>
+        {writable && (
+          <Link
+            className="button primary"
+            to={`/new?${new URLSearchParams({ namespace, group })}`}
+            aria-disabled={!!scopeError}
+            onClick={(event) => {
+              if (scopeError) event.preventDefault()
+            }}
+          >
+            <Plus size={18} aria-hidden="true" />
+            新建配置
+          </Link>
+        )}
       </div>
       <div className="scope-bar">
         <label>
@@ -139,9 +152,11 @@ export function ConfigListPage() {
             {!groups.data?.includes(group) && <option>{group}</option>}
           </Select>
         </label>
-        <Link className="scope-manage" to="/organization">
-          管理命名空间 <ArrowRight size={14} aria-hidden="true" />
-        </Link>
+        {manage && (
+          <Link className="scope-manage" to="/organization">
+            管理命名空间 <ArrowRight size={14} aria-hidden="true" />
+          </Link>
+        )}
       </div>
       <section className="panel">
         <div className="panel-toolbar">
@@ -184,7 +199,7 @@ export function ConfigListPage() {
             </Button>
           </div>
         </div>
-        {selected.length > 0 && (
+        {writable && selected.length > 0 && (
           <div className="batch-toolbar" role="group" aria-label="批量配置操作">
             <span role="status" aria-live="polite" aria-atomic="true">
               已选择 <strong>{selected.length}</strong> 项
@@ -218,26 +233,28 @@ export function ConfigListPage() {
               <table className="config-table">
                 <thead>
                   <tr>
-                    <th className="selection-cell" scope="col">
-                      <label className="selection-toggle">
-                        <input
-                          type="checkbox"
-                          aria-label="全选当前页配置"
-                          checked={rows.every((item) =>
-                            selected.some((selection) => selection.id === item.id),
-                          )}
-                          ref={(input) => {
-                            if (input)
-                              input.indeterminate =
-                                selected.length > 0 &&
-                                !rows.every((item) =>
-                                  selected.some((selection) => selection.id === item.id),
-                                )
-                          }}
-                          onChange={(event) => setSelected(event.target.checked ? [...rows] : [])}
-                        />
-                      </label>
-                    </th>
+                    {writable && (
+                      <th className="selection-cell" scope="col">
+                        <label className="selection-toggle">
+                          <input
+                            type="checkbox"
+                            aria-label="全选当前页配置"
+                            checked={rows.every((item) =>
+                              selected.some((selection) => selection.id === item.id),
+                            )}
+                            ref={(input) => {
+                              if (input)
+                                input.indeterminate =
+                                  selected.length > 0 &&
+                                  !rows.every((item) =>
+                                    selected.some((selection) => selection.id === item.id),
+                                  )
+                            }}
+                            onChange={(event) => setSelected(event.target.checked ? [...rows] : [])}
+                          />
+                        </label>
+                      </th>
+                    )}
                     <th>配置名称</th>
                     <th>全量版本</th>
                     <th>
@@ -251,22 +268,24 @@ export function ConfigListPage() {
                       key={config.id}
                       data-selected={selected.some((item) => item.id === config.id) || undefined}
                     >
-                      <td className="selection-cell">
-                        <label className="selection-toggle">
-                          <input
-                            type="checkbox"
-                            aria-label={`选择 ${config.key.name}`}
-                            checked={selected.some((item) => item.id === config.id)}
-                            onChange={(event) =>
-                              setSelected((previous) =>
-                                event.target.checked
-                                  ? [...previous, config]
-                                  : previous.filter((item) => item.id !== config.id),
-                              )
-                            }
-                          />
-                        </label>
-                      </td>
+                      {writable && (
+                        <td className="selection-cell">
+                          <label className="selection-toggle">
+                            <input
+                              type="checkbox"
+                              aria-label={`选择 ${config.key.name}`}
+                              checked={selected.some((item) => item.id === config.id)}
+                              onChange={(event) =>
+                                setSelected((previous) =>
+                                  event.target.checked
+                                    ? [...previous, config]
+                                    : previous.filter((item) => item.id !== config.id),
+                                )
+                              }
+                            />
+                          </label>
+                        </td>
+                      )}
                       <td>
                         <Link to={configUrl(config.key)} className="config-name">
                           <span className="file-icon">
@@ -299,14 +318,14 @@ export function ConfigListPage() {
               action={
                 searchQuery ? (
                   <Button onClick={() => setSearch('')}>清除搜索</Button>
-                ) : (
+                ) : writable ? (
                   <Link
                     to={`/new?${new URLSearchParams({ namespace, group })}`}
                     className="button secondary"
                   >
                     创建第一份配置
                   </Link>
-                )
+                ) : undefined
               }
             />
           ))
@@ -340,7 +359,7 @@ export function ConfigListPage() {
           </div>
         </div>
       </section>
-      {batchAction && selected.length > 0 && (
+      {writable && batchAction && selected.length > 0 && (
         <BatchConfigDialog
           action={batchAction}
           configs={selected}

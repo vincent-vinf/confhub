@@ -399,7 +399,7 @@ test('组织管理拒绝非空删除，配置删除需输入名称', async ({ pa
   expect((await page.request.get(path(name))).status()).toBe(404)
 })
 
-test('密码错误不误判会话过期，修改密码并退出后重新登录', async ({ page }) => {
+test('密码错误不误判会话过期，修改密码撤销会话并重新登录', async ({ page }) => {
   await login(page)
   await page.getByRole('link', { name: '账号设置', exact: true }).click()
   await page.getByLabel('当前密码', { exact: true }).fill('wrong-password')
@@ -410,6 +410,10 @@ test('密码错误不误判会话过期，修改密码并退出后重新登录',
   await expect(page.getByRole('dialog')).not.toBeVisible()
   await page.getByLabel('当前密码', { exact: true }).fill(password)
   await page.getByRole('button', { name: '更新密码' }).click()
+  await expect(page.getByRole('dialog')).toContainText('登录已过期')
+  await page.getByRole('dialog').getByLabel('密码', { exact: true }).fill('ui-changed-password')
+  await page.getByRole('button', { name: '登录控制台' }).click()
+  await expect(page.getByRole('dialog')).not.toBeVisible()
   await expect(page.getByLabel('当前密码', { exact: true })).toHaveValue('')
   await page.getByRole('button', { name: '退出登录' }).click()
   await page.getByLabel('密码', { exact: true }).fill('ui-changed-password')
@@ -863,13 +867,22 @@ test('长标签建议列表的键盘选中项保持可见', async ({ page }) => 
     .poll(
       async () => {
         await input.blur()
+        await expect(page.locator('.tag-suggestion-popup')).not.toBeVisible()
         await input.focus()
         return page.getByRole('option', { name: 'tag-30', exact: true }).count()
       },
       { timeout: 15000, intervals: [1000] },
     )
     .toBe(1)
-  for (let i = 0; i < 30; i++) await input.press('ArrowDown')
+  await expect(input).toBeFocused()
+  // Observe each keyboard result before the next event; presence refreshes and
+  // focus restoration must finish before navigating the suggestion list.
+  for (let i = 1; i <= 30; i++) {
+    await input.press('ArrowDown')
+    await expect(
+      page.getByRole('option', { name: `tag-${String(i).padStart(2, '0')}`, exact: true }),
+    ).toHaveAttribute('aria-selected', 'true')
+  }
   const selected = page.getByRole('option', { name: 'tag-30', exact: true })
   await expect(selected).toHaveAttribute('aria-selected', 'true')
   const popup = page.locator('.tag-suggestion-popup')

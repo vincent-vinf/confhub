@@ -9,10 +9,12 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useBlocker } from 'react-router-dom'
 import { CheckCircle2, X } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
+import { allows } from '../lib/permissions'
+import type { User } from '../lib/types'
 import { Button, Modal } from './ui'
 
 type Theme = 'light' | 'dark'
@@ -81,55 +83,79 @@ type AuthStatus = 'checking' | 'anonymous' | 'authenticated' | 'expired'
 type Auth = {
   status: AuthStatus
   bootstrapError?: Error
-  login: (password: string) => Promise<void>
+  user?: User
+  login: (username: string, password: string) => Promise<void>
   logout: () => Promise<void>
   retry: () => void
 }
 const AuthContext = createContext<Auth>(null!)
 export const useAuth = () => useContext(AuthContext)
+export function usePermission(action: string, namespace = '', group = '') {
+  return allows(useAuth().user, action, namespace, group)
+}
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
   const [status, setStatus] = useState<AuthStatus>('checking')
   const [bootstrapError, setBootstrapError] = useState<Error>()
   const [attempt, setAttempt] = useState(0)
+  const [user, setUser] = useState<User>()
+  const identity = useQuery({
+    queryKey: ['me', attempt],
+    queryFn: ({ signal }) => api.me(signal),
+    enabled: status === 'checking' || status === 'authenticated',
+    refetchInterval: 15000,
+    refetchOnWindowFocus: true,
+    staleTime: 0,
+  })
   useEffect(() => {
-    const controller = new AbortController()
-    api
-      .namespaces(controller.signal)
-      .then((namespaces) => {
-        if (controller.signal.aborted) return
-        queryClient.setQueryData(['namespaces'], namespaces)
-        setStatus('authenticated')
-        setBootstrapError(undefined)
-      })
-      .catch((error) => {
-        if (controller.signal.aborted) return
-        if (error instanceof ApiError && error.status === 401) setStatus('anonymous')
-        else setBootstrapError(error)
-      })
-    return () => controller.abort()
-  }, [attempt, queryClient])
+    if (identity.data) {
+      setUser(identity.data)
+      setStatus('authenticated')
+      setBootstrapError(undefined)
+    }
+    if (identity.error) {
+      if (identity.error instanceof ApiError && identity.error.status === 401)
+        setStatus((s) => (s === 'authenticated' || s === 'expired' ? 'expired' : 'anonymous'))
+      else setBootstrapError(identity.error)
+    }
+  }, [identity.data, identity.error])
+  const permissions = JSON.stringify(
+    user && [user.id, user.enabled, user.system_admin, user.clients_read, user.grants],
+  )
+  useEffect(() => {
+    void queryClient.invalidateQueries({ predicate: (q) => q.queryKey[0] !== 'me' })
+  }, [permissions, queryClient])
   useEffect(() => {
     const expire = () =>
       setStatus((s) => (s === 'authenticated' || s === 'expired' ? 'expired' : 'anonymous'))
     window.addEventListener('confhub:unauthorized', expire)
     return () => window.removeEventListener('confhub:unauthorized', expire)
   }, [])
-  const login = async (password: string) => {
-    await api.login('admin', password)
+  const login = async (username: string, password: string) => {
+    await api.login(username, password)
+    const next = await api.me()
+    if (next.id !== user?.id) queryClient.clear()
+    setUser(next)
+    queryClient.setQueryData(['me', attempt], next)
     setStatus('authenticated')
     setBootstrapError(undefined)
     await queryClient.invalidateQueries()
   }
   const logout = async () => {
-    await api.logout()
+    try {
+      await api.logout()
+    } catch (error) {
+      if (!(error instanceof ApiError && error.status === 401)) throw error
+    }
     queryClient.clear()
     setStatus('anonymous')
+    setUser(undefined)
   }
   return (
     <AuthContext.Provider
       value={{
         status,
+        user,
         bootstrapError,
         login,
         logout,

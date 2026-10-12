@@ -34,16 +34,18 @@ func New(store *storage.Store, hub *syncer.Hub, options Options) (*Server, error
 	}
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
-	r.Use(gin.Recovery())
 	r.SetTrustedProxies(nil)
 	s := &Server{store: store, hub: hub, options: options, router: r}
+	r.Use(s.audit, gin.Recovery())
 	r.Use(func(c *gin.Context) { c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 8<<20); c.Next() })
 	r.POST("/api/admin/login", s.sameOrigin, s.login)
-	a := r.Group("/api/admin", s.authenticate, s.sameOrigin)
+	a := r.Group("/api/admin", s.authenticate, s.sameOrigin, s.authorize)
 	a.POST("/logout", s.logout)
 	a.POST("/password", s.password)
-	a.GET("/namespaces", func(c *gin.Context) { v, err := s.store.Namespaces(c.Request.Context()); s.respond(c, v, err) })
+	a.GET("/namespaces", s.namespaces)
+	s.userRoutes(a)
 	s.configRoutes(a)
+	a.GET("/audits", s.audits)
 	a.GET("/clients", s.clients)
 	a.GET("/client-tags", s.clientTags)
 	r.GET("/api/client/config", s.clientGet)
@@ -80,6 +82,9 @@ func (s *Server) respond(c *gin.Context, value any, err error) {
 	case errors.Is(err, syncer.ErrUnavailable):
 		status = 503
 		message = err.Error()
+	case errors.Is(err, storage.ErrForbidden):
+		status = 403
+		message = "permission denied"
 	case errors.Is(err, storage.ErrUnauthorized):
 		status = 401
 		message = "invalid credentials"

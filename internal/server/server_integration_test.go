@@ -88,8 +88,8 @@ func TestAdminAuthenticationAndSameOriginProtection(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer stillValid.Body.Close()
-	if stillValid.StatusCode != 200 {
-		t.Fatal("password change unexpectedly revoked pure JWT")
+	if stillValid.StatusCode != 401 {
+		t.Fatal("password change failed to revoke old JWT")
 	}
 }
 

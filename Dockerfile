@@ -18,7 +18,7 @@ ARG IMAGE_TAG=dev
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${IMAGE_TAG}" -o /out/confhub ./cmd/main
-FROM docker.m.daocloud.io/alpine:3.23
+FROM registry.cn-hangzhou.aliyuncs.com/bodesi/alpine:3.23
 WORKDIR /app
 RUN apk add --no-cache ca-certificates && \
     addgroup --system confhub && \

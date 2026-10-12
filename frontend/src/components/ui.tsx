@@ -15,6 +15,7 @@ export function Button({
 }) {
   return (
     <button
+      type="button"
       {...props}
       className={`button ${variant} ${className}`}
       disabled={props.disabled || busy}

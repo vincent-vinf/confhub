@@ -82,3 +82,38 @@ export type OnlineClient = {
   subscriptions: ClientSubscription[]
 }
 export type ClientPage = { clients: OnlineClient[]; next_after?: string }
+
+export type Grant = { namespace: string; group: string; access: 'read' | 'write' }
+export type UserInput = {
+  enabled: boolean
+  system_admin: boolean
+  clients_read: boolean
+  grants: Grant[]
+}
+export type User = UserInput & { id: string; username: string; revision: number }
+
+export type Audit = {
+  id: string
+  request_id: string
+  created_at: string
+  user_id: string
+  username: string
+  attempted_username?: string
+  ip: string
+  action: string
+  subject: string
+  method: string
+  result: 'success' | 'failure' | 'pending'
+  status: number
+  duration_ms: number
+  details: Record<string, unknown>
+}
+export type AuditPage = { audits: Audit[]; next_before?: string }
+export type AuditFilter = {
+  username: string
+  ip: string
+  action: string
+  result: string
+  from: string
+  to: string
+}

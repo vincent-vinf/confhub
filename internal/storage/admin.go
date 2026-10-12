@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/vincent-vinf/confhub/internal/config"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
@@ -19,8 +20,8 @@ func validatePassword(password string) error {
 	return nil
 }
 func (s *Store) InitializeAdmin(ctx context.Context, password string) error {
-	var row adminRow
-	err := s.db.WithContext(ctx).Take(&row, 1).Error
+	var row userRow
+	err := s.db.WithContext(ctx).Take(&row, "username = ?", "admin").Error
 	if err == nil {
 		return nil
 	}
@@ -30,7 +31,7 @@ func (s *Store) InitializeAdmin(ctx context.Context, password string) error {
 	if err = validatePassword(password); err != nil {
 		return fmt.Errorf("first initialization requires admin-password: %w", err)
 	}
-	encoded, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}
@@ -39,52 +40,36 @@ func (s *Store) InitializeAdmin(ctx context.Context, password string) error {
 		return err
 	}
 	defer tx.Rollback()
-	err = tx.Take(&row, 1).Error
-	if err == nil {
+	if err = tx.Take(&row, "username = ?", "admin").Error; err == nil {
 		return nil
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
-	if err = tx.Create(&adminRow{ID: 1, PasswordHash: string(encoded)}).Error; err != nil {
+	row = userRow{ID: uuid.NewString(), Username: "admin", PasswordHash: string(hash), Enabled: true, SystemAdmin: true, Revision: 1, AuthVersion: 1}
+	if err = tx.Create(&row).Error; err != nil {
 		return err
 	}
 	return tx.Commit().Error
 }
-func (s *Store) Authenticate(ctx context.Context, username, password string) error {
-	var row adminRow
-	if err := s.db.WithContext(ctx).Take(&row, 1).Error; err != nil {
-		return err
-	}
-	if len(password) > 72 {
-		return ErrUnauthorized
-	}
-	err := bcrypt.CompareHashAndPassword([]byte(row.PasswordHash), []byte(password))
-	if err != nil || username != "admin" {
-		return ErrUnauthorized
-	}
-	return nil
-}
-func (s *Store) ChangePassword(ctx context.Context, oldPassword, newPassword string) error {
+func (s *Store) ChangePassword(ctx context.Context, id string, authVersion int64, oldPassword, newPassword string) error {
 	if len(oldPassword) > 72 {
 		return ErrUnauthorized
 	}
 	if err := validatePassword(newPassword); err != nil {
 		return err
 	}
-	var row adminRow
-	if err := s.db.WithContext(ctx).Take(&row, 1).Error; err != nil {
-		return err
+	var row userRow
+	if err := s.db.WithContext(ctx).Take(&row, "id = ?", id).Error; err != nil {
+		return storageError(err)
 	}
-	if bcrypt.CompareHashAndPassword([]byte(row.PasswordHash), []byte(oldPassword)) != nil {
+	if !row.Enabled || row.AuthVersion != authVersion || bcrypt.CompareHashAndPassword([]byte(row.PasswordHash), []byte(oldPassword)) != nil {
 		return ErrUnauthorized
 	}
-	encoded, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}
-	result := s.db.WithContext(ctx).Model(&adminRow{}).
-		Where(map[string]any{"id": 1, "password_hash": row.PasswordHash}).Update("password_hash", string(encoded))
+	result := s.db.WithContext(ctx).Model(&userRow{}).Where("id = ? AND auth_version = ? AND password_hash = ? AND enabled = ?", id, authVersion, row.PasswordHash, true).Updates(map[string]any{"password_hash": string(hash), "auth_version": gorm.Expr("auth_version + 1"), "revision": gorm.Expr("revision + 1")})
 	if result.Error != nil {
 		return result.Error
 	}

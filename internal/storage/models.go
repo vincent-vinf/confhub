@@ -97,12 +97,27 @@ type leaseRow struct {
 
 func (leaseRow) TableName() string { return "maintenance_lease" }
 
-type adminRow struct {
-	ID           int `gorm:"primaryKey;autoIncrement:false"`
+type userRow struct {
+	ID           string `gorm:"primaryKey"`
+	Username     string
 	PasswordHash string
+	Enabled      bool
+	SystemAdmin  bool
+	ClientsRead  bool
+	AuthVersion  int64
+	Revision     int64
 }
 
-func (adminRow) TableName() string { return "admin" }
+func (userRow) TableName() string { return "users" }
+
+type grantRow struct {
+	UserID    string `gorm:"primaryKey"`
+	Namespace string `gorm:"primaryKey"`
+	GroupName string `gorm:"primaryKey"`
+	Access    string
+}
+
+func (grantRow) TableName() string { return "user_grants" }
 
 type instanceRow struct {
 	ID          string `gorm:"primaryKey"`
@@ -138,3 +153,22 @@ func loadVersion(db *gorm.DB, id string, number int64) (config.Version, error) {
 	err := db.Where(map[string]any{"config_id": id, "number": number}).Take(&row).Error
 	return row.version(), storageError(err)
 }
+
+type auditRow struct {
+	ID                int64 `gorm:"primaryKey"`
+	RequestID         string
+	CreatedAt         int64 `gorm:"autoCreateTime:false"`
+	UserID            string
+	Username          string
+	AttemptedUsername string
+	IP                string
+	Action            string
+	Subject           string
+	Method            string
+	Result            string
+	Status            int
+	DurationMS        int64
+	DetailsJSON       string `gorm:"column:details_json"`
+}
+
+func (auditRow) TableName() string { return "audit_logs" }

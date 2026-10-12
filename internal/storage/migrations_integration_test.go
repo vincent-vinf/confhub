@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"golang.org/x/crypto/bcrypt"
+	"os"
 	"strings"
 	"testing"
 
@@ -114,5 +116,124 @@ func TestAllPriorSchemasRequireRecreationWithoutMutatingConfig(t *testing.T) {
 				t.Fatal(current, err)
 			}
 		})
+	}
+}
+
+func TestSchemaFourUpgradePreservesAdminAndConfigurations(t *testing.T) {
+	dsn := testutil.Database(t)
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, file := range []string{"000001_initial.up.sql", "000002_mutable_beta.up.sql", "000003_client_presence.up.sql", "000004_shared_beta.up.sql"} {
+		contents, err := os.ReadFile("migrations/postgres/" + file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = db.Exec(string(contents)); err != nil {
+			t.Fatal(file, err)
+		}
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte("original-password"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec("INSERT INTO admin VALUES (1,$1)", string(hash)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec("CREATE TABLE schema_migrations (version BIGINT PRIMARY KEY, dirty BOOLEAN NOT NULL); INSERT INTO schema_migrations VALUES (4,FALSE)"); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	store, err := storage.Open(ctx, "postgres", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	key := config.Key{Namespace: "public", Group: "DEFAULT_GROUP", Name: "preserved"}
+	m, err := store.Save(ctx, key, config.Edit{Content: "keep", Format: "text"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = storage.Migrate("postgres", dsn, true); err == nil || !strings.Contains(err.Error(), "run confhub migrate") {
+		t.Fatal("implicit upgrade", err)
+	}
+	if err = storage.Migrate("postgres", dsn, false); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.InitializeAdmin(ctx, "replacement-password"); err != nil {
+		t.Fatal(err)
+	}
+	u, err := store.Authenticate(ctx, "admin", "original-password")
+	if err != nil || !u.SystemAdmin {
+		t.Fatal(u, err)
+	}
+	current, err := store.Snapshot(ctx, key)
+	if err != nil || current.ID != m.State.ID || current.Versions[1].Content != "keep" {
+		t.Fatal(current, err)
+	}
+	if err = storage.Migrate("postgres", dsn, true); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSchemaFiveAuditUpgradePreservesUsersAndConfigurations(t *testing.T) {
+	dsn := testutil.Database(t)
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, file := range []string{"000001_initial.up.sql", "000002_mutable_beta.up.sql", "000003_client_presence.up.sql", "000004_shared_beta.up.sql", "000005_users.up.sql"} {
+		contents, err := os.ReadFile("migrations/postgres/" + file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = db.Exec(string(contents)); err != nil {
+			t.Fatal(file, err)
+		}
+	}
+	if _, err = db.Exec("CREATE TABLE schema_migrations (version BIGINT PRIMARY KEY, dirty BOOLEAN NOT NULL); INSERT INTO schema_migrations VALUES (5,FALSE)"); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	store, err := storage.Open(ctx, "postgres", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err = store.InitializeAdmin(ctx, "initial-password"); err != nil {
+		t.Fatal(err)
+	}
+	u, err := store.CreateUser(ctx, "operator", "operator-password", storage.UserInput{Enabled: true, Grants: []storage.Grant{{Namespace: "public", Access: "write"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := config.Key{Namespace: "public", Group: "DEFAULT_GROUP", Name: "preserved"}
+	m, err := store.Save(ctx, key, config.Edit{Content: "keep", Format: "text"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = storage.Migrate("postgres", dsn, true); err == nil || !strings.Contains(err.Error(), "run confhub migrate") {
+		t.Fatal("implicit upgrade", err)
+	}
+	if err = storage.Migrate("postgres", dsn, false); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.Authenticate(ctx, "operator", "operator-password")
+	if err != nil || got.ID != u.ID || !got.Allows("config.write", "public", "DEFAULT_GROUP") {
+		t.Fatal(got, err)
+	}
+	current, err := store.Snapshot(ctx, key)
+	if err != nil || current.ID != m.State.ID || current.Versions[1].Content != "keep" {
+		t.Fatal(current, err)
+	}
+	page, err := store.Audits(ctx, storage.AuditFilter{Limit: 25})
+	if err != nil || len(page.Audits) != 0 {
+		t.Fatal(page, err)
+	}
+	if err = storage.Migrate("postgres", dsn, true); err != nil {
+		t.Fatal(err)
 	}
 }

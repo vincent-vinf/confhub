@@ -3,9 +3,10 @@ import { KeyRound } from 'lucide-react'
 import { api } from '../lib/api'
 import { bytes } from '../lib/config'
 import { Button, ErrorNotice } from '../components/ui'
-import { useDirty, useToast, usePending } from '../components/providers'
+import { useDirty, useToast, usePending, useAuth } from '../components/providers'
 
 export function SettingsPage() {
+  const auth = useAuth()
   const [oldPassword, setOldPassword] = useState(''),
     [newPassword, setNewPassword] = useState(''),
     [repeat, setRepeat] = useState('')
@@ -34,7 +35,8 @@ export function SettingsPage() {
       setOldPassword('')
       setNewPassword('')
       setRepeat('')
-      toast('密码已更新，下次登录请使用新密码。')
+      toast('密码已更新，请重新登录。')
+      window.dispatchEvent(new Event('confhub:unauthorized'))
     } catch (e) {
       setError(e)
     } finally {
@@ -118,14 +120,13 @@ export function SettingsPage() {
           </form>
         </section>
         <aside className="account-summary">
-          <span className="avatar large">A</span>
-          <h2>admin</h2>
-          <BadgeLine />
+          <span className="avatar large">{auth.user?.username[0]?.toUpperCase()}</span>
+          <h2>{auth.user?.username}</h2>
+          <span className="badge success">
+            {auth.user?.system_admin ? '系统管理员' : '普通用户'}
+          </span>
         </aside>
       </div>
     </>
   )
-}
-function BadgeLine() {
-  return <span className="badge success">管理员</span>
 }

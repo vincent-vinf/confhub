@@ -21,7 +21,7 @@ import { formatContent, validateContent } from '../lib/format'
 import { formats, type ConfigKey, type ConfigState, type Draft } from '../lib/types'
 import { CodeEditor, type EditorHandle } from '../components/editor'
 import { Badge, Button, ErrorNotice, Loading, Modal } from '../components/ui'
-import { useDirty, useToast } from '../components/providers'
+import { useDirty, useToast, usePermission } from '../components/providers'
 import { ChangeDialog } from '../components/change-dialog'
 import { HistoryPanel } from './history'
 import { RulesPanel } from './rules'
@@ -30,9 +30,12 @@ import { DeleteConfigDialog } from '../components/delete-dialog'
 export function ConfigDetailPage() {
   const params = useParams()
   const key = { namespace: params.namespace!, group: params.group!, name: params.name! }
+  const readable = usePermission('config.read', key.namespace, key.group)
+  if (!readable) return <ErrorNotice error="你没有读取此配置的权限。" />
   return <Detail key={`${key.namespace}/${key.group}/${key.name}`} configKey={key} />
 }
 function Detail({ configKey }: { configKey: ConfigKey }) {
+  const writable = usePermission('config.write', configKey.namespace, configKey.group)
   const query = useQuery({
     queryKey: configQueryKey(configKey),
     queryFn: ({ signal }) => api.state(configKey, signal),
@@ -95,7 +98,7 @@ function Detail({ configKey }: { configKey: ConfigKey }) {
     setPendingTarget(undefined)
   }
   async function reviewSave() {
-    if (!draft || !baseline || saving) return
+    if (!writable || !draft || !baseline || saving) return
     const captured = draft
     setSaving(true)
     setError(undefined)
@@ -165,10 +168,12 @@ function Detail({ configKey }: { configKey: ConfigKey }) {
             <Badge tone="success">全量 v{baseline.global_version}</Badge>
           </div>
         </div>
-        <Button variant="ghost" className="destructive-text" onClick={() => setDeleting(true)}>
-          <Trash2 size={16} aria-hidden="true" />
-          删除配置
-        </Button>
+        {writable && (
+          <Button variant="ghost" className="destructive-text" onClick={() => setDeleting(true)}>
+            <Trash2 size={16} aria-hidden="true" />
+            删除配置
+          </Button>
+        )}
       </div>
       <div className="tabs" role="tablist" aria-label="配置管理区域">
         {[
@@ -222,7 +227,7 @@ function Detail({ configKey }: { configKey: ConfigKey }) {
           <div className="editor-toolbar">
             <div className="edit-target">
               <label>
-                编辑目标
+                {writable ? '编辑目标' : '查看目标'}
                 <Select
                   aria-label="编辑目标"
                   value={draft.target ?? 'global'}
@@ -248,6 +253,7 @@ function Detail({ configKey }: { configKey: ConfigKey }) {
                 格式
                 <Select
                   aria-label="配置格式"
+                  disabled={!writable}
                   value={draft.format}
                   onValueChange={(value) => {
                     setDraft({ ...draft, format: value as Draft['format'] })
@@ -263,7 +269,8 @@ function Detail({ configKey }: { configKey: ConfigKey }) {
               </label>
               <Button
                 variant="ghost"
-                disabled={!['json', 'yaml'].includes(draft.format)}
+                disabled={!writable || !['json', 'yaml'].includes(draft.format)}
+                hidden={!writable}
                 busy={formatting}
                 onClick={format}
               >
@@ -280,6 +287,7 @@ function Detail({ configKey }: { configKey: ConfigKey }) {
           />
           <CodeEditor
             ref={editor}
+            readOnly={!writable}
             value={draft.content}
             format={draft.format}
             onChange={(value) => {
@@ -311,6 +319,7 @@ function Detail({ configKey }: { configKey: ConfigKey }) {
             </label>
             <input
               id="version-description"
+              readOnly={!writable}
               placeholder="简要说明这次内容变更…"
               value={draft.description}
               onChange={(e) => setDraft({ ...draft, description: e.target.value })}
@@ -332,12 +341,13 @@ function Detail({ configKey }: { configKey: ConfigKey }) {
                 <Copy size={16} aria-hidden="true" />
                 复制
               </Button>
-              <Button onClick={() => setReset(true)} disabled={!dirty}>
+              <Button hidden={!writable} onClick={() => setReset(true)} disabled={!dirty}>
                 <RotateCcw size={16} aria-hidden="true" />
                 还原编辑
               </Button>
               <Button
                 variant="primary"
+                hidden={!writable}
                 busy={saving}
                 disabled={!target || !dirty}
                 onClick={reviewSave}
@@ -370,7 +380,7 @@ function Detail({ configKey }: { configKey: ConfigKey }) {
           />
         </section>
       )}
-      {review && (
+      {writable && review && (
         <ChangeDialog
           configKey={configKey}
           baseline={baseline}
@@ -383,7 +393,7 @@ function Detail({ configKey }: { configKey: ConfigKey }) {
           }}
         />
       )}
-      {deleting && (
+      {writable && deleting && (
         <DeleteConfigDialog
           configKey={configKey}
           state={baseline}

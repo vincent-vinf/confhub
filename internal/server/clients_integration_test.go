@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
 	"github.com/vincent-vinf/confhub/internal/clientinfo"
 	"github.com/vincent-vinf/confhub/internal/config"
@@ -48,10 +47,7 @@ func TestClientsAreReadOnlyAuthenticatedAndVisibleAcrossReplicas(t *testing.T) {
 	a, b := newReplica(), newReplica()
 	defer a.Close()
 	defer b.Close()
-	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.RegisteredClaims{Subject: "admin", Issuer: "confhub", ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour))}).SignedString([]byte(secret))
-	if err != nil {
-		t.Fatal(err)
-	}
+	token := adminToken(t, store, secret)
 	get := func(path string, auth bool) *http.Response {
 		t.Helper()
 		r, _ := http.NewRequest("GET", a.URL+path, nil)

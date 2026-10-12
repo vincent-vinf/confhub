@@ -4,12 +4,16 @@
 
 ## 管理认证
 
-`POST /api/admin/login` 提交 `{"username":"admin","password":"…"}`，获得默认 2 小时有效的 HttpOnly、SameSite=Strict Cookie。Cookie 路径为 `/api/admin`。所有管理接口均要求此 Cookie，登录除外。
+`POST /api/admin/login` 提交 `{"username":"用户名","password":"…"}`，获得默认 2 小时有效的 HttpOnly、SameSite=Strict Cookie。Cookie 路径为 `/api/admin`。所有管理接口均要求此 Cookie，登录除外。
 
 所有管理写入（包括登录）要求同源 `Origin` 或 `Referer`；命令行调用也应发送 `Origin: http://host:port`。HTTPS 代理部署设置 `--cookie-secure=true`，并保留外部 Host。后端不信任任意转发头。
 
 - `POST /api/admin/logout`：清除浏览器 Cookie，返回 204。
-- `POST /api/admin/password`：`{"old_password":"…","new_password":"…"}`。密码为 8–72 字节。修改密码不撤销已签发 JWT。
+- `POST /api/admin/password`：`{"old_password":"…","new_password":"…"}`。密码为 8–72 字节。修改本人密码，旧 JWT 在各实例失效，清除 Cookie 后需重新登录。
+
+多用户与权限、用户管理接口见 [users-permissions.md](users-permissions.md)。管理请求按 namespace/group 检查读写权限，组织列表过滤不可读范围。
+
+系统管理员通过 `GET /api/admin/audits` 查询持久化审计，支持 username/ip/action/result/from/to/before/limit。返回 `{audits:[],next_before?:string}`，审计 ID 和游标是字符串，默认每页 25 条、最大 100。被审计请求返回 X-Request-ID；审计存储无法写入时返回 503 并阻止业务处理。详情、记录范围及 pending 语义见 [audit.md](audit.md)。
 
 ## 组织与配置
 
@@ -143,17 +147,17 @@ target 省略或为 `global` 时全量保存，`beta` 时覆盖唯一 beta；不
 
 - `/health/live`：进程响应返回 200。
 - `/health/ready`：数据库同步正常返回 200，否则 503；启动同步尚未完成时为 503。
-- 管理端 400：校验、缺少确认、组织非空；401：认证失败；403：来源不符；404：不存在；409：乐观锁冲突；500：内部故障。
+- 管理端 400：校验、缺少确认、组织非空；401：认证失败；403：来源不符或权限不足；404：不存在；409：乐观锁冲突；500：内部故障。
 - 客户端同步不可用返回 503。连续数据库同步失败默认 2 秒后关闭已有会话，恢复时重建缓存和消费水位。
 - React 静态目录通过 flag/env 提供；页面路由可回退到 index.html，配置详情页中的 `.json`/`.yaml` 等名称同样支持直接访问与刷新。未知 API 和缺失资源返回 404。应用镜像在构建阶段生成并复制 React 页面，由 Go 直接提供。
 
 ## 数据库模型边界
 
-当前 schema 4 仅支持空数据库初始化，不兼容 schema 1/2/3。启动和 migrate 均拒绝旧 schema，要求使用新的空数据库或由使用者重建，不自动删除或转换旧数据。
+当前 schema 6 支持空数据库初始化，以及从 schema 4/5 显式执行 `confhub migrate` 升级，保留 admin 密码和配置。schema 1/2/3 仍拒绝启动及迁移，需按此前策略重建。
 
 ## 在线客户端（只读管理接口）
 
-- `GET /api/admin/clients?after=<连接ID>&limit=25`：要求 admin 登录，返回 `{clients:[],next_after?:string}`。按连接 ID 游标分页，limit 1–100。连接 ID 每次重连重新生成，不代表机器身份。
+- `GET /api/admin/clients?after=<连接ID>&limit=25`：要求已登录且拥有 clients.read（或系统管理员），返回 `{clients:[],next_after?:string}`。按连接 ID 游标分页，limit 1–100。连接 ID 每次重连重新生成，不代表机器身份。
 - 每个客户端包含 `id/instance_id/source_address/connected_at/refreshed_at/tags/subscriptions`。`subscriptions` 项包含 `key/id/version/revision/beta/rule_id/deleted/sent`，没有配置正文。`sent:false` 表示尚未成功发送；`sent:true` 表示最近一次成功的 WebSocket 写入，不代表应用确认。beta 显示为 beta，规则 ID 仅说明首条匹配条件。
 - `GET /api/admin/client-tags?tag=<标签名>&prefix=<前缀>`：返回所有有效实例中对应标签的去重值。省略 tag 返回标签名，始终包含符合前缀的 `sys.ip/sys.hostname`。大小写、空字符串和尾部空格保持字符串语义；prefix 为字面前缀（`%/_` 不是通配符），最多 100 条。继续输入前缀可发现初始列表之外的值。
 - 在线仅指成功升级的 WebSocket 连接，包含暂未订阅的连接；HTTP GET 不记录。标签由客户端传入，远端地址单独展示。

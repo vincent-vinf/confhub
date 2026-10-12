@@ -1,3 +1,4 @@
+import { usePermission } from '../components/providers'
 import { Select } from '../components/select'
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
@@ -22,6 +23,7 @@ export function HistoryPanel({
   onRebase: (state: ConfigState) => void
   onEditBeta: () => void
 }) {
+  const writable = usePermission('config.write', configKey.namespace, configKey.group)
   const versions = useQuery({
     queryKey: ['versions', configKey],
     queryFn: ({ signal }) => allVersions(configKey, signal),
@@ -106,10 +108,11 @@ export function HistoryPanel({
                     <td>
                       <div className="row-actions">
                         <Button variant="ghost" onClick={onEditBeta}>
-                          编辑 beta
+                          {writable ? '编辑 beta' : '查看 beta'}
                         </Button>
                         <Button
                           variant="ghost"
+                          hidden={!writable}
                           onClick={() =>
                             setAction({ kind: 'promote', source: targetVersion(state, 'beta') })
                           }
@@ -174,6 +177,7 @@ export function HistoryPanel({
                         </Button>
                         <Button
                           variant="ghost"
+                          hidden={!writable}
                           aria-label={`回退到 v${version.number}`}
                           busy={loading === version.number}
                           onClick={() => rollback(version.number)}
@@ -246,7 +250,7 @@ export function HistoryPanel({
           onClose={() => setCompare(undefined)}
         />
       )}
-      {action && (
+      {writable && action && (
         <ChangeDialog
           configKey={configKey}
           baseline={state}

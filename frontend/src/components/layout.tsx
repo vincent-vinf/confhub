@@ -2,6 +2,8 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
+  ScrollText,
+  Users,
   Layers3,
   Monitor,
   Files,
@@ -48,6 +50,7 @@ function Layout() {
   const location = useLocation()
   const navigate = useNavigate()
   const { theme, toggle } = useTheme()
+  const { user } = useAuth()
   const health = useQuery({
     queryKey: ['health'],
     queryFn: ({ signal }) => api.ready(signal),
@@ -55,13 +58,17 @@ function Layout() {
     refetchOnWindowFocus: true,
   })
   useEffect(() => setMenu(false), [location.pathname, location.search])
-  const title = location.pathname.startsWith('/clients')
-    ? '在线客户端'
-    : location.pathname.startsWith('/organization')
-      ? '命名空间'
-      : location.pathname.startsWith('/settings')
-        ? '账号设置'
-        : '配置管理'
+  const title = location.pathname.startsWith('/audits')
+    ? '操作审计'
+    : location.pathname.startsWith('/users')
+      ? '用户管理'
+      : location.pathname.startsWith('/clients')
+        ? '在线客户端'
+        : location.pathname.startsWith('/organization')
+          ? '命名空间'
+          : location.pathname.startsWith('/settings')
+            ? '账号设置'
+            : '配置管理'
   const sidebar = (
     <>
       <a
@@ -88,14 +95,30 @@ function Layout() {
           <Files size={19} aria-hidden="true" />
           配置管理
         </NavLink>
-        <NavLink to="/organization">
-          <FolderTree size={19} aria-hidden="true" />
-          命名空间
-        </NavLink>
-        <NavLink to="/clients">
-          <Monitor size={19} aria-hidden="true" />
-          在线客户端
-        </NavLink>
+        {user?.system_admin && (
+          <NavLink to="/organization">
+            <FolderTree size={19} aria-hidden="true" />
+            命名空间
+          </NavLink>
+        )}
+        {(user?.system_admin || user?.clients_read) && (
+          <NavLink to="/clients">
+            <Monitor size={19} aria-hidden="true" />
+            在线客户端
+          </NavLink>
+        )}
+        {user?.system_admin && (
+          <NavLink to="/users">
+            <Users size={19} aria-hidden="true" />
+            用户管理
+          </NavLink>
+        )}
+        {user?.system_admin && (
+          <NavLink to="/audits">
+            <ScrollText size={19} aria-hidden="true" />
+            操作审计
+          </NavLink>
+        )}
         <NavLink to="/settings">
           <Settings2 size={19} aria-hidden="true" />
           账号设置
@@ -179,9 +202,9 @@ function Layout() {
               )}
             </Button>
             <span className="avatar" aria-hidden="true">
-              A
+              {user?.username[0]?.toUpperCase()}
             </span>
-            <span className="account-name">admin</span>
+            <span className="account-name">{user?.username}</span>
             <Button
               variant="ghost"
               className="icon-button"
@@ -193,7 +216,17 @@ function Layout() {
           </div>
         </header>
         <main id="main" className="page" tabIndex={-1}>
-          <Outlet />
+          {((location.pathname.startsWith('/organization') ||
+            location.pathname.startsWith('/users') ||
+            location.pathname.startsWith('/audits')) &&
+            !user?.system_admin) ||
+          (location.pathname.startsWith('/clients') &&
+            !user?.system_admin &&
+            !user?.clients_read) ? (
+            <ErrorNotice error="你没有访问此页面的权限。" />
+          ) : (
+            <Outlet />
+          )}
         </main>
         <footer className="workspace-footer">
           <span>ConfHub</span>
