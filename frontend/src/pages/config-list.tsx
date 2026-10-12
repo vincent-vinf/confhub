@@ -7,13 +7,17 @@ import {
   ChevronLeft,
   ChevronRight,
   FileCode2,
+  FolderInput,
   Plus,
   RefreshCw,
   Search,
+  Trash2,
   X,
 } from 'lucide-react'
 import { api, configUrl, groupIndex } from '../lib/api'
 import { Badge, Button, Empty, ErrorNotice, Loading } from '../components/ui'
+import { BatchConfigDialog } from '../components/batch-config-dialog'
+import type { ConfigSummary } from '../lib/types'
 
 export function ConfigListPage() {
   const [params, setParams] = useSearchParams()
@@ -23,6 +27,8 @@ export function ConfigListPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [cursors, setCursors] = useState([''])
   const [searchPage, setSearchPage] = useState(0)
+  const [selected, setSelected] = useState<ConfigSummary[]>([])
+  const [batchAction, setBatchAction] = useState<'delete' | 'move'>()
   const namespaces = useQuery({
     queryKey: ['namespaces'],
     queryFn: ({ signal }) => api.namespaces(signal),
@@ -65,6 +71,9 @@ export function ConfigListPage() {
     ? (filtered?.length ?? 0) > (searchPage + 1) * 25
     : rows?.length === 25
   const pageNumber = searchQuery ? searchPage + 1 : cursors.length
+  useEffect(() => {
+    setSelected([])
+  }, [namespace, group, searchQuery, searchPage, pageNumber])
   const scopeError =
     namespaces.data && !namespaces.data.includes(namespace)
       ? '命名空间不存在，请选择其他命名空间。'
@@ -166,12 +175,35 @@ export function ConfigListPage() {
               className="icon-button"
               aria-label="刷新配置列表"
               busy={query.isFetching}
-              onClick={() => query.refetch()}
+              onClick={() => {
+                setSelected([])
+                query.refetch()
+              }}
             >
               <RefreshCw size={17} aria-hidden="true" />
             </Button>
           </div>
         </div>
+        {selected.length > 0 && (
+          <div className="batch-toolbar" role="group" aria-label="批量配置操作">
+            <span role="status" aria-live="polite" aria-atomic="true">
+              已选择 <strong>{selected.length}</strong> 项
+            </span>
+            <div className="batch-actions">
+              <Button onClick={() => setBatchAction('move')}>
+                <FolderInput size={16} aria-hidden="true" />
+                移动配置
+              </Button>
+              <Button variant="danger" onClick={() => setBatchAction('delete')}>
+                <Trash2 size={16} aria-hidden="true" />
+                删除配置
+              </Button>
+              <Button variant="ghost" onClick={() => setSelected([])}>
+                取消选择
+              </Button>
+            </div>
+          </div>
+        )}
         <ErrorNotice
           error={scopeError || namespaces.error || groups.error || query.error}
           onRetry={scopeError ? undefined : () => query.refetch()}
@@ -186,6 +218,26 @@ export function ConfigListPage() {
               <table className="config-table">
                 <thead>
                   <tr>
+                    <th className="selection-cell" scope="col">
+                      <label className="selection-toggle">
+                        <input
+                          type="checkbox"
+                          aria-label="全选当前页配置"
+                          checked={rows.every((item) =>
+                            selected.some((selection) => selection.id === item.id),
+                          )}
+                          ref={(input) => {
+                            if (input)
+                              input.indeterminate =
+                                selected.length > 0 &&
+                                !rows.every((item) =>
+                                  selected.some((selection) => selection.id === item.id),
+                                )
+                          }}
+                          onChange={(event) => setSelected(event.target.checked ? [...rows] : [])}
+                        />
+                      </label>
+                    </th>
                     <th>配置名称</th>
                     <th>全量版本</th>
                     <th>
@@ -195,7 +247,26 @@ export function ConfigListPage() {
                 </thead>
                 <tbody>
                   {rows.map((config) => (
-                    <tr key={config.id}>
+                    <tr
+                      key={config.id}
+                      data-selected={selected.some((item) => item.id === config.id) || undefined}
+                    >
+                      <td className="selection-cell">
+                        <label className="selection-toggle">
+                          <input
+                            type="checkbox"
+                            aria-label={`选择 ${config.key.name}`}
+                            checked={selected.some((item) => item.id === config.id)}
+                            onChange={(event) =>
+                              setSelected((previous) =>
+                                event.target.checked
+                                  ? [...previous, config]
+                                  : previous.filter((item) => item.id !== config.id),
+                              )
+                            }
+                          />
+                        </label>
+                      </td>
                       <td>
                         <Link to={configUrl(config.key)} className="config-name">
                           <span className="file-icon">
@@ -269,6 +340,19 @@ export function ConfigListPage() {
           </div>
         </div>
       </section>
+      {batchAction && selected.length > 0 && (
+        <BatchConfigDialog
+          action={batchAction}
+          configs={selected}
+          onClose={() => setBatchAction(undefined)}
+          onSuccess={() => {
+            setBatchAction(undefined)
+            setSelected([])
+            setCursors([''])
+            setSearchPage(0)
+          }}
+        />
+      )}
     </>
   )
 }

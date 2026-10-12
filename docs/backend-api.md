@@ -48,6 +48,15 @@ target 省略或为 `global` 时全量保存，`beta` 时覆盖唯一 beta；不
 
 声明格式支持 `text/json/yaml/toml/xml/properties/ini`。发布前服务器校验语法，不展开应用占位符或转换正文。名称为 1–128 字节，不能包含斜杠或首尾空白。
 
+## 批量删除与移动
+
+- `POST /api/admin/configs/batch-delete`：正文为 `{"configs":[{"key":{"namespace":"public","group":"DEFAULT_GROUP","name":"app.yaml"},"expected_id":"UUID","expected_revision":7}],"confirmed":true}`。
+- `POST /api/admin/configs/batch-move`：同上，额外传入目标 `namespace` 和 `group`，如 `"namespace":"production","group":"apps"`。目标组织必须已存在。
+- 每批 1–200 份配置，不接受重复键。所有配置的身份与修订在同一事务内校验；任何配置不存在、并发变更或目标名称冲突均整批回滚，不产生部分写入或通知。成功返回 `{"count":2,"sequence":42}`。
+- 移动保留配置名称、身份、历史版本、当前全量、唯一 beta 及规则，修订号增加 1，不产生新版本。原键写入删除事件，目标键写入有效状态变更事件，在同一事务中提交。既有客户端订阅仍指向原键，需要使用新的 namespace/group；订阅目标键的客户端会收到当前内容。
+- 目标与来源相同返回 400；目标已有同名配置返回 409，不覆盖、不合并；不存在的来源或目标分组返回 404。删除会清除配置及全部历史、beta 和灰度规则。
+- 控制台支持当前页多选与全选，选中后在列表上方出现批量操作栏；切换筛选条件、页码或刷新时清空选择。移动弹窗联动选择目标命名空间和分组，删除要求二次确认。
+
 ## 历史、回退与灰度
 
 | 方法 | 路径 | 正文 / 参数 |

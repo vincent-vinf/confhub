@@ -55,3 +55,20 @@ it('搜索索引和历史元数据遍历服务端游标', async () => {
     undefined,
   )
 })
+
+it('目标同名冲突明确提示整批移动未执行', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ error: 'destination already contains configuration "app"' }),
+          { status: 409 },
+        ),
+      ),
+  )
+  await expect(api.batchMove([], 'target', 'apps')).rejects.toThrow(
+    '目标分组已存在同名配置，整批移动未执行',
+  )
+})

@@ -43,6 +43,8 @@ func integer(c *gin.Context, name string, fallback int64) (int64, error) {
 	return v, nil
 }
 func (s *Server) configRoutes(a *gin.RouterGroup) {
+	a.POST("/configs/batch-delete", func(c *gin.Context) { s.batchConfigs(c, false) })
+	a.POST("/configs/batch-move", func(c *gin.Context) { s.batchConfigs(c, true) })
 	a.POST("/namespaces", func(c *gin.Context) {
 		var b struct {
 			Name string `json:"name"`

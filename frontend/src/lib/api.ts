@@ -24,6 +24,8 @@ export class ApiError extends Error {
 const friendlyError = (status: number, serverMessage?: string) => {
   if (status === 401) return '登录已过期，请重新登录。你的编辑内容会保留。'
   if (status === 403) return '请求来源校验失败，请使用与服务相同的访问地址。'
+  if (status === 409 && serverMessage?.includes('destination already contains configuration'))
+    return '目标分组已存在同名配置，整批移动未执行。请更换目标分组。'
   if (status === 409) return '配置已被其他人修改，请读取最新版本后重新比较。'
   if (serverMessage?.includes('namespace or group is not empty'))
     return '这里仍有分组或配置，请先移除其中的内容。'
@@ -117,6 +119,16 @@ export const api = {
   save: (key: ConfigKey, edit: Edit) => request<Mutation>(configPath(key), body('PUT', edit)),
   remove: (key: ConfigKey, baseline: Baseline) =>
     request<Mutation>(configPath(key), body('DELETE', { ...baseline, confirmed: true })),
+  batchDelete: (configs: ConfigSummary[]) =>
+    request<{ count: number; sequence: number }>(
+      `${base}/configs/batch-delete`,
+      body('POST', { configs: configTargets(configs), confirmed: true }),
+    ),
+  batchMove: (configs: ConfigSummary[], namespace: string, group: string) =>
+    request<{ count: number; sequence: number }>(
+      `${base}/configs/batch-move`,
+      body('POST', { configs: configTargets(configs), namespace, group, confirmed: true }),
+    ),
   history: (key: ConfigKey, before = 0, limit = 100, signal?: AbortSignal) =>
     request<VersionPage>(
       `${configPath(key)}/versions?${new URLSearchParams({ before: String(before), limit: String(limit) })}`,
@@ -158,6 +170,8 @@ export const api = {
     }
   },
 }
+const configTargets = (configs: ConfigSummary[]) =>
+  configs.map(({ key, id, revision }) => ({ key, expected_id: id, expected_revision: revision }))
 export async function groupIndex(namespace: string, group: string, signal?: AbortSignal) {
   const result: ConfigSummary[] = []
   let after = ''

@@ -136,6 +136,15 @@ func (s *Store) insertVersion(ctx context.Context, tx *gorm.DB, state *config.St
 }
 
 func (s *Store) publish(ctx context.Context, tx *gorm.DB, state *config.State, seq int64, deleted bool) (int64, error) {
+	seq, err := s.appendEvent(ctx, tx, state, seq, deleted)
+	if err != nil {
+		return 0, err
+	}
+	return seq, tx.Commit().Error
+}
+
+// appendEvent lets a batch publish all affected keys in the same transaction.
+func (s *Store) appendEvent(ctx context.Context, tx *gorm.DB, state *config.State, seq int64, deleted bool) (int64, error) {
 	seq++
 	if err := tx.WithContext(ctx).Model(&streamRow{}).Where(map[string]any{"id": 1}).Update("sequence", seq).Error; err != nil {
 		return 0, err
@@ -145,7 +154,7 @@ func (s *Store) publish(ctx context.Context, tx *gorm.DB, state *config.State, s
 		return 0, err
 	}
 	state.Sequence = seq
-	return seq, tx.Commit().Error
+	return seq, nil
 }
 func (s *Store) Save(ctx context.Context, k config.Key, edit config.Edit) (config.Mutation, error) {
 	if err := k.Validate(); err != nil {

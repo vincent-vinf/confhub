@@ -760,8 +760,48 @@ tr:last-child td {
 tbody tr:hover {
   background: var(--surface-subtle);
 }
-.config-table th:first-child {
+.config-table th:nth-child(2) {
   width: 50%;
+}
+.config-table .selection-cell {
+  width: 48px;
+  padding: 8px;
+}
+.selection-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  min-height: 32px;
+  cursor: pointer;
+}
+.selection-toggle input {
+  cursor: pointer;
+}
+.config-table tr[data-selected='true'] {
+  background: var(--accent-soft);
+}
+.batch-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 22px;
+  border-top: 1px solid var(--border);
+  background: var(--accent-soft);
+}
+.batch-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.batch-summary ul {
+  margin: 8px 0 20px;
+  padding-left: 22px;
+  max-height: 160px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
 }
 .config-name {
   display: inline-flex;
