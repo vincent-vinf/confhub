@@ -3,7 +3,6 @@ package syncer
 import (
 	"context"
 	"errors"
-	"fmt"
 	"github.com/google/uuid"
 	"github.com/vincent-vinf/confhub/internal/clientinfo"
 	"sort"
@@ -45,11 +44,6 @@ func (s *Session) Subscribe(ctx context.Context, k config.Key) error {
 		s.mu.Unlock()
 		h.mu.Unlock()
 		return nil
-	}
-	if len(s.subscriptions) >= 10 {
-		s.mu.Unlock()
-		h.mu.Unlock()
-		return fmt.Errorf("%w: at most 10 subscriptions", config.ErrInvalid)
 	}
 	s.generation++
 	generation := s.generation

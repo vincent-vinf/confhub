@@ -72,13 +72,13 @@ func (r *runner) protocol() {
 	must(conn.WriteJSON(object{"op": "unknown", "key": k}))
 	_, _, err = conn.ReadMessage()
 	require(websocket.IsCloseError(err, websocket.ClosePolicyViolation), "invalid operation did not close with policy violation")
-	// Ten subscriptions fit; releasing one slot admits another, the eleventh closes.
+	// A single connection accepts more than ten configurations and resubscriptions.
 	conn2, _, err := websocket.DefaultDialer.Dial(endpoint, nil)
 	must(err)
 	defer conn2.Close()
 	conn2.SetReadDeadline(time.Now().Add(r.timeout))
 	keys := []sdk.Key{}
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 32; i++ {
 		key := r.key(fmt.Sprintf("protocol-slot-%d", i))
 		keys = append(keys, key)
 		must(conn2.WriteJSON(object{"op": "subscribe", "key": key}))
@@ -89,8 +89,9 @@ func (r *runner) protocol() {
 	extra := r.key("protocol-extra")
 	must(conn2.WriteJSON(object{"op": "subscribe", "key": extra}))
 	must(conn2.ReadJSON(&snapshot))
-	require(snapshot.Key == extra, "released slot was not reusable")
-	must(conn2.WriteJSON(object{"op": "subscribe", "key": r.key("protocol-overflow")}))
-	_, _, err = conn2.ReadMessage()
-	require(websocket.IsCloseError(err, websocket.ClosePolicyViolation), "subscription overflow accepted")
+	require(snapshot.Key == extra, "resubscribe failed")
+	extra2 := r.key("protocol-another")
+	must(conn2.WriteJSON(object{"op": "subscribe", "key": extra2}))
+	must(conn2.ReadJSON(&snapshot))
+	require(snapshot.Key == extra2 && snapshot.Deleted, "additional subscription failed")
 }

@@ -373,8 +373,8 @@ class ValidationTests(unittest.TestCase):
                 Key(name)
 
 
-class SubscriptionLimitTests(unittest.IsolatedAsyncioTestCase):
-    async def test_ten_keys_fit_and_unsubscribe_releases_capacity(self):
+class SubscriptionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_multiple_keys_and_resubscribe(self):
         async def get_config(request):
             return web.json_response(
                 dict(
@@ -401,10 +401,10 @@ class SubscriptionLimitTests(unittest.IsolatedAsyncioTestCase):
         address = "http://127.0.0.1:" + str(server.addresses[0][1])
         try:
             async with AsyncClient([address]) as client:
-                for index in range(10):
+                for index in range(32):
                     await client.subscribe(Key(f"key-{index}"), lambda value: None)
                 with self.assertRaises(ValueError):
-                    await client.subscribe(Key("eleventh"), lambda value: None)
+                    await client.subscribe(Key("key-0"), lambda value: None)
                 await client.unsubscribe(Key("key-0"))
                 await client.subscribe(Key("replacement"), lambda value: None)
         finally:

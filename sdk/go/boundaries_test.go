@@ -26,7 +26,7 @@ func TestPublicOptionsRejectInvalidInputs(t *testing.T) {
 		}
 	}
 }
-func TestSubscriptionLimitsCancellationAndConcurrentClose(t *testing.T) {
+func TestMultipleSubscriptionsCancellationAndConcurrentClose(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/client/config" {
 			w.WriteHeader(503)
@@ -50,7 +50,7 @@ func TestSubscriptionLimitsCancellationAndConcurrentClose(t *testing.T) {
 	if err := c.Subscribe(canceled, confhub.Key{Name: "canceled"}, callback); !errors.Is(err, context.Canceled) {
 		t.Fatal("canceled subscription accepted", err)
 	}
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 32; i++ {
 		if err := c.Subscribe(context.Background(), confhub.Key{Name: fmt.Sprintf("key-%d", i)}, callback); err != nil {
 			t.Fatal(err)
 		}
@@ -58,14 +58,11 @@ func TestSubscriptionLimitsCancellationAndConcurrentClose(t *testing.T) {
 	if err := c.Subscribe(context.Background(), confhub.Key{Name: "key-0"}, callback); err == nil {
 		t.Fatal("duplicate accepted")
 	}
-	if err := c.Subscribe(context.Background(), confhub.Key{Name: "eleventh"}, callback); err == nil {
-		t.Fatal("capacity exceeded")
-	}
 	if err := c.Unsubscribe(confhub.Key{Name: "key-0"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.Subscribe(context.Background(), confhub.Key{Name: "replacement"}, callback); err != nil {
-		t.Fatal("unsubscribe did not release capacity", err)
+		t.Fatal("resubscribe after unsubscribe failed", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -83,7 +80,9 @@ func TestSubscriptionLimitsCancellationAndConcurrentClose(t *testing.T) {
 					errs <- err
 				}
 			} else {
-				errs <- c.Unsubscribe(confhub.Key{Name: "replacement"})
+				if err := c.Unsubscribe(confhub.Key{Name: "replacement"}); err != nil && !errors.Is(err, confhub.ErrClosed) {
+					errs <- err
+				}
 			}
 		}(i)
 	}

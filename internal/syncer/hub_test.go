@@ -350,7 +350,7 @@ func TestLateInitialSnapshotCannotOverwriteNewerPublication(t *testing.T) {
 		t.Fatalf("late old snapshot overwrote new publication: %+v", value)
 	}
 }
-func TestSubscriptionLimitAndUnsubscribeReleaseCapacity(t *testing.T) {
+func TestMultipleSubscriptionsAndUnsubscribeCleanup(t *testing.T) {
 	store := testutil.Store(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -362,18 +362,32 @@ func TestSubscriptionLimitAndUnsubscribeReleaseCapacity(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer session.Close()
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 32; i++ {
 		k := config.Key{Namespace: "public", Group: "DEFAULT_GROUP", Name: fmt.Sprintf("service-%d", i)}
 		if err = session.Subscribe(ctx, k); err != nil {
 			t.Fatal(err)
 		}
 	}
-	extra := config.Key{Namespace: "public", Group: "DEFAULT_GROUP", Name: "extra"}
-	if err = session.Subscribe(ctx, extra); !errors.Is(err, config.ErrInvalid) {
-		t.Fatal("subscription limit not enforced")
+	session.Connected("127.0.0.1:12345")
+	if clients := h.Clients(); len(clients) != 1 || len(clients[0].Subscriptions) != 32 {
+		t.Fatalf("expected one connection with 32 subscriptions: %+v", clients)
 	}
-	session.Unsubscribe(config.Key{Namespace: "public", Group: "DEFAULT_GROUP", Name: "service-0"})
-	if err = session.Subscribe(ctx, extra); err != nil {
-		t.Fatal("unsubscribe did not release capacity")
+	first := config.Key{Namespace: "public", Group: "DEFAULT_GROUP", Name: "service-0"}
+	if err = session.Subscribe(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	if clients := h.Clients(); len(clients[0].Subscriptions) != 32 {
+		t.Fatal("duplicate added another subscription")
+	}
+	session.Unsubscribe(first)
+	if clients := h.Clients(); len(clients[0].Subscriptions) != 31 {
+		t.Fatal("unsubscribe left connection metadata behind")
+	}
+	if err = session.Subscribe(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	session.Close()
+	if len(h.Clients()) != 0 {
+		t.Fatal("closed connection left subscriptions behind")
 	}
 }

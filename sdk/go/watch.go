@@ -13,6 +13,19 @@ import (
 
 type Callback func(context.Context, Snapshot)
 
+// SubscribeOptions controls initial notification and duplicate registration.
+// Zero values preserve Subscribe's behavior.
+type SubscribeOptions struct {
+	// SkipInitial suppresses the initial state, while keeping changes that
+	// arrive between the initial HTTP read and WebSocket registration.
+	SkipInitial bool
+	// RequireExisting rejects a missing configuration before replacing a watch.
+	RequireExisting bool
+	// Replace atomically replaces an existing subscription after a successful
+	// initial read. An already running old callback may finish.
+	Replace bool
+}
+
 type subscription struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
@@ -20,42 +33,63 @@ type subscription struct {
 	last    *Snapshot
 }
 
-// Subscribe registers one callback per key, up to ten keys per client. The
+// Subscribe registers one callback per key without a fixed subscription count limit. The
 // initial snapshot may be offline; a missing key delivers a deletion snapshot.
 // Callbacks run independently of network receive and must honor their context.
 func (c *Client) Subscribe(ctx context.Context, key Key, callback Callback) error {
+	_, err := c.SubscribeWithOptions(ctx, key, SubscribeOptions{}, callback)
+	return err
+}
+
+// SubscribeWithOptions reads the current state once and registers a callback,
+// returning that initial state. Later notifications may start before it returns.
+// A failed registration leaves an existing subscription in place.
+func (c *Client) SubscribeWithOptions(ctx context.Context, key Key, options SubscribeOptions, callback Callback) (Snapshot, error) {
 	key, err := key.normalized()
 	if err != nil {
-		return err
+		return Snapshot{}, err
 	}
 	if callback == nil {
-		return fmt.Errorf("confhub: callback is required")
+		return Snapshot{}, fmt.Errorf("confhub: callback is required")
 	}
 	value, err := c.Get(ctx, key)
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		return err
+	if err != nil && (!errors.Is(err, ErrNotFound) || options.RequireExisting) {
+		return value, err
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed || c.ctx.Err() != nil {
-		return ErrClosed
+		return Snapshot{}, ErrClosed
 	}
 	if ctx.Err() != nil {
-		return ctx.Err()
+		return Snapshot{}, ctx.Err()
 	}
-	if _, exists := c.subscriptions[key]; exists {
-		return fmt.Errorf("confhub: key already subscribed")
+	// A current watch may have received a newer state during the HTTP read.
+	value = c.records[key]
+	if options.RequireExisting && value.Deleted {
+		return value, ErrNotFound
 	}
-	if len(c.subscriptions) >= 10 {
-		return fmt.Errorf("confhub: at most ten subscriptions per client")
+	if old := c.subscriptions[key]; old != nil {
+		if !options.Replace {
+			return Snapshot{}, fmt.Errorf("confhub: key already subscribed")
+		}
+		old.cancel()
 	}
 	lifetime, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(c.ctx, cancel)
 	sub := &subscription{ctx: lifetime, cancel: cancel, pending: make(chan Snapshot, 1)}
 	c.subscriptions[key] = sub
-	c.enqueueLocked(sub, value)
-	c.wg.Add(2)
+	if options.SkipInitial {
+		initial := value
+		sub.last = &initial
+	} else {
+		c.enqueueLocked(sub, value)
+	}
+	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
+		defer stop()
+		defer cancel()
 		defer func() {
 			c.mu.Lock()
 			if c.subscriptions[key] == sub {
@@ -69,7 +103,7 @@ func (c *Client) Subscribe(ctx context.Context, key Key, callback Callback) erro
 			case <-sub.ctx.Done():
 				return
 			case next := <-sub.pending:
-				if sub.ctx.Err() != nil {
+				if sub.ctx.Err() != nil || c.ctx.Err() != nil {
 					return
 				}
 				func() {
@@ -83,16 +117,8 @@ func (c *Client) Subscribe(ctx context.Context, key Key, callback Callback) erro
 			}
 		}
 	}()
-	go func() {
-		defer c.wg.Done()
-		select {
-		case <-c.ctx.Done():
-			cancel()
-		case <-sub.ctx.Done():
-		}
-	}()
 	c.resetLocked()
-	return nil
+	return value, nil
 }
 
 // Unsubscribe cancels pending callbacks and releases the subscription. An
@@ -104,6 +130,9 @@ func (c *Client) Unsubscribe(key Key) error {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.closed || c.ctx.Err() != nil {
+		return ErrClosed
+	}
 	if sub := c.subscriptions[key]; sub != nil {
 		delete(c.subscriptions, key)
 		sub.cancel()

@@ -370,7 +370,6 @@ def main():
     if (
         min(args.writers, args.clients, args.configs, args.rounds) < 1
         or args.writers < 2
-        or args.configs > 10
     ):
         parser.error("invalid test sizes")
     if (

@@ -189,7 +189,9 @@ func (c *Client) report(err error) {
 	}
 }
 
-func (c *Client) Close(ctx context.Context) error {
+// Stop requests shutdown without waiting for callbacks. It is safe to call
+// from a callback; use Wait or Close elsewhere to wait for shutdown to finish.
+func (c *Client) Stop() {
 	c.closeOnce.Do(func() {
 		c.cancel()
 		go func() {
@@ -208,10 +210,22 @@ func (c *Client) Close(ctx context.Context) error {
 			close(c.done)
 		}()
 	})
+}
+
+// Wait waits for shutdown and all running callbacks to finish. It does not
+// initiate shutdown. A callback must not wait for its own completion.
+func (c *Client) Wait(ctx context.Context) error {
 	select {
 	case <-c.done:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// Close requests shutdown and waits for completion within ctx's lifetime.
+// Call Stop instead when initiating shutdown from inside a callback.
+func (c *Client) Close(ctx context.Context) error {
+	c.Stop()
+	return c.Wait(ctx)
 }

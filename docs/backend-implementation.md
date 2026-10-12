@@ -25,7 +25,7 @@
 | PostgreSQL / MySQL 与 golang-migrate | GORM 方言驱动、两套迁移 SQL、独立迁移池、migrate 子命令 | PostgreSQL 全部集成；幂等迁移、业务池存活、dirty 拒绝；MySQL 仅静态审查 |
 | admin 首次初始化、纯 JWT、密码修改、Cookie 来源保护 | InitializeAdmin、认证与密码 API | 重启不覆盖密码、新密码登录/旧密码拒绝、旧 JWT 保持有效、非法 JWT 和跨来源请求拒绝 |
 | 客户端匿名 HTTP GET 与完整 WebSocket 推送 | client config/watch API | 未登录读取、创建前缺失、发布、删除、同名重建推送 |
-| 独立广播消费、有界缓存/待发送状态、长连接容量限制 | Hub、stateCache、Session | 两实例消费、实际 HTTP 在 A 发布经 B WebSocket 接收；灰度无影响不通知、订阅上限与释放容量 |
+| 独立广播消费、有界缓存/待发送状态、长连接容量限制 | Hub、stateCache、Session | 两实例消费、实际 HTTP 在 A 发布经 B WebSocket 接收；灰度无影响不通知、单连接多配置订阅与取消清理 |
 | 订阅竞态、故障退出就绪、恢复与日志缺口补偿 | 快照流序号、独立 watchdog、补偿消费 | 迟到初始读取不覆盖新快照、数据库错误/黑洞、连接关闭、恢复获取最新状态、日志过期补偿 |
 | 心跳、超时与慢连接关闭 | WebSocket 10s Ping、30s 静默、5s 写超时；到期 context 优先 | 已过期读取 deadline 不被待发送数据覆盖；代码审查确认独立心跳时钟 |
 | 操作日志、静态目录和错误路由 | JSON slog 操作日志、OpenRoot 静态服务、健康接口 | Compose 操作日志、静态页面回退与 API/资源 404 测试 |

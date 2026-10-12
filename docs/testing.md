@@ -94,7 +94,7 @@ go -C tests/system run -race . \
 ## 场景与断言
 
 - 业务：组织隔离、原文保真、跨实例发布、从旧主版本复制共享 beta、beta 连续覆盖、描述变化不推送、规则重排/停用/重开、全量回退、转全量、历史分页、IP 边界、删除重建及旧基准拒绝。
-- 协议：认证、来源、确认字段、格式、退役字段、分页、未知 API/资源、匿名客户端、WebSocket 非法操作和订阅上限/释放。
+- 协议：认证、来源、确认字段、格式、退役字段、分页、未知 API/资源、匿名客户端、WebSocket 非法操作、单连接多配置订阅及取消。
 - 并发：同基准主/beta 写入单赢家、全量与规则竞争、beta 与最后规则删除竞争、删除与旧编辑竞争；不同配置并行、连续发布/100 客户端收敛、慢回调及 SDK 生命周期竞态。
 - 随机：固定种子的 60 步操作序列，用独立内容账本和标签样例核对普通/灰度客户端，不复用生产解析器。
 - 在线：仅 WebSocket 入列表、跨实例已发送信息、内置标签/字面值建议、断连最终移除。
@@ -157,3 +157,38 @@ Go 使用语句覆盖率，Python 使用语句/行覆盖率。Go 的 `backend-me
 首次浏览器回归为 20 通过、1 失败，原层报告保持失败状态，trace 保存在该目录的 `frontend-failure/`。trace 确认填写规则名称时下拉菜单尚未恢复焦点，表单仍为 inert；请求本身已包含空名称，存储返回与请求一致。测试辅助函数改为等待菜单关闭及焦点恢复，并增加规则保存名称断言后，重新执行全部 21 个浏览器流程通过，日志为 `test-results/gorm-frontend-after.log`。不将首次失败记录覆盖成通过。
 
 本次继续仅验收真实 PostgreSQL；MySQL 维护 GORM 方言支持，未运行实库测试。容量、资源和 P99 指标仍未测量。
+
+## 移除订阅数量上限（2026-10-10）
+
+服务端、Go/Python SDK 统一移除单客户端 10 个订阅的固定上限。专项报告为 `test-results/subscriptions-unlimited-20261010`，执行 `--layers integration,system --scenarios protocol,concurrency --writers 4 --clients 6 --configs 16 --rounds 2` 通过：后端 PostgreSQL race/vet、两个 SDK 集成、协议与并发以及独立连接模式均通过。协议验证单条 WebSocket 连接注册 32 个订阅后仍可增加订阅；SDK 同时验证多配置订阅、重复订阅拒绝、取消及并发关闭。
+
+`bodesi-pkg/nacos` 使用本地新版 SDK 的 race、三实例集成和调用方编译验证通过；32 个配置共用一个 SDK 客户端及一条有效 WebSocket 连接，包含断线恢复、取消后离线读取和替换监听。SDK 发布前，适配库使用本地 module 替换进行联调。
+
+## Go SDK 订阅与适配层简化（2026-10-12）
+
+Go SDK 新增 `SubscribeWithOptions`，合并初始读取和订阅注册，支持跳过初始通知、要求配置存在以及成功读取后替换已有订阅；原 `Subscribe` 的默认通知行为保持不变。新增非阻塞 `Stop` 和等待关闭完成的 `Wait(ctx)`，`Close(ctx)` 组合两者。回调生命周期由 SDK 统一管理，每个订阅减少一个用于取消传播的常驻 goroutine。
+
+`bodesi-pkg/nacos` 移除独立订阅表、回调队列、后台执行循环和客户端 HTTP 定时轮询，核心适配文件从 193 行缩减至 72 行，两个运行文件合计从 373 行缩减至 246 行。保留原内容变化通知和参数映射，初版曾临时保留旧轮询方法、配置字段和 flag 的兼容入口；后续按要求已将这些入口完全删除，见下方记录；断线依靠 WebSocket 重连后的最新快照恢复。
+
+验证通过：
+
+- Go SDK 全部 `go test -race ./...` 与 `go vet ./...`，新增单次初始读取、读取与订阅之间更新不丢失、失败/取消替换保留旧订阅、回调内 Stop、Wait 超时及最终退出测试。
+- `python3 sdk/test-integration.py`：指定 PostgreSQL 17 镜像和两个独立实例，Go SDK race 及 Python 14 个测试（含真实服务集成）通过。
+- `python3 nacos/run-integration.py /home/bodesi/repo/confhub`：三个独立实例，适配库全部 race 和真实服务集成通过；覆盖跨实例推送、灰度、回退、删除重建、并发读取及单连接 32 个订阅恢复。新增验证旧轮询参数不会增加 HTTP 请求、回调内替换自身订阅可继续收到更新。
+- 适配库 `config`、`service/config-reload` 的 race 检查及相关包 vet 通过。
+
+测试环境均已清理；SDK 与适配库仍使用本地 module 替换联调，正式发布前需更新 SDK 远程版本并移除该替换。
+
+现有 `platform-api` 的五个使用方包（`akf_bootstrapper`、`appdep`、升级 resolver/runtime 和 `pkg/edge`）编译通过，未修改其源码或模块文件，检查使用临时 modfile 同时指向本地适配库和新版 SDK。首次构建因根分区空间不足失败；改用内存盘保存临时构建文件与缓存后，通过 `go test -exec=/usr/bin/true -vet=off -run=^$` 仅验证编译链接，未执行这些使用方的测试；相关临时文件已清理。
+
+### 删除失效接口（2026-10-12）
+
+按要求删除 `SetConfigWatchPollInterval`、`config.Options.NacosWatchPoll`、`-nacos-watch-poll`，一并删除默认值、flag 绑定和失效的兼容测试，适配库运行代码降至 241 行。调用方需移除方法调用、字段赋值及部署参数；本次不修改调用方。保留并验证不执行 HTTP 定时轮询及 WebSocket 恢复后的最新快照通知。
+
+删除后 `go test -race ./nacos ./config ./service/config-reload`、对应包的 `go vet` 和差异格式检查通过。
+
+### 合并适配层（2026-10-12）
+
+删除 `nacos/confhub.go` 中的中间结构 `confhubConfig` 和构造、读取、监听、取消、关闭转发方法，统一到 `nacos.Client`。Client 直接持有 Go SDK 客户端，公开方法直接调用 SDK；删除仅用于适配的配置键转发和独立客户端校验方法，命名空间默认值直接由 SDK 处理。运行代码从两个文件 241 行降至单个 `nacos/nacos.go` 的 186 行。
+
+`go test -race ./nacos ./config ./service/config-reload`、相关包 vet 和差异格式检查通过，覆盖空 namespace、首次通知过滤、替换、回调内关闭及替换、断线恢复和并发生命周期。

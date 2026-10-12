@@ -114,7 +114,7 @@ target 省略或为 `global` 时全量保存，`beta` 时覆盖唯一 beta；不
 
 ## WebSocket
 
-连接 `/api/client/watch?tags=…`，同一连接固定使用此标签上下文，最多订阅 10 份配置。无需 Cookie 或令牌；携带浏览器 Origin 时必须同源。
+连接 `/api/client/watch?tags=…`，同一连接固定使用此标签上下文，订阅数量不设置固定上限。无需 Cookie 或令牌；携带浏览器 Origin 时必须同源。
 
 ```json
 {"op":"subscribe","key":{"namespace":"public","group":"DEFAULT_GROUP","name":"service"}}
@@ -126,7 +126,7 @@ target 省略或为 `global` 时全量保存，`beta` 时覆盖唯一 beta；不
 {"op":"unsubscribe","key":{"namespace":"public","group":"DEFAULT_GROUP","name":"service"}}
 ```
 
-重复 subscribe 不新增订阅；unsubscribe 不要求配置仍存在。非法操作、非法标签或超出订阅限制关闭连接。协议使用 WebSocket Ping/Pong，每 10 秒 Ping、30 秒未响应关闭；客户端需持续读取并响应协议心跳。写入超过 5 秒关闭慢连接。
+重复 subscribe 不新增订阅；unsubscribe 不要求配置仍存在。非法操作或非法标签关闭连接。协议使用 WebSocket Ping/Pong，每 10 秒 Ping、30 秒未响应关闭；客户端需持续读取并响应协议心跳。写入超过 5 秒关闭慢连接。
 
 断线后客户端重新建立全部订阅，以首次快照补偿；服务端不重放每个历史版本。明确删除应清除客户端缓存，连接失败保留最后成功配置。SDK 的缓存与重连实现和用法见 [sdk.md](sdk.md)。
 

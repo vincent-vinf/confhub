@@ -59,7 +59,27 @@ func main() {
 }
 ```
 
-`Get` 的错误可用 `errors.Is` 判断 `ErrNotFound`、`ErrUnavailable`、`ErrClosed` 和 context 取消。不存在时返回删除快照及 `ErrNotFound`。`Close(ctx)` 取消所有订阅、关闭连接，并在 context 时限内等待后台任务与回调退出；回调必须响应其 context，不要在回调里等待 `Close` 完成。异步缓存/回调异常通过 `client.Errors()` 的有界通道报告。
+`Get` 的错误可用 `errors.Is` 判断 `ErrNotFound`、`ErrUnavailable`、`ErrClosed` 和 context 取消。不存在时返回删除快照及 `ErrNotFound`。`Stop()` 发起关闭而不等待回调退出，可在回调内调用；`Wait(ctx)` 在 context 时限内等待关闭完成，但不会主动关闭客户端。`Close(ctx)` 等价于先 `Stop()` 再 `Wait(ctx)`。回调必须响应其 context，不要在回调内等待 `Wait` 或 `Close` 完成。关闭后读取、订阅及取消订阅返回 `ErrClosed`；活动客户端重复取消同一订阅不会报错。异步缓存/回调异常通过 `client.Errors()` 的有界通道报告。
+
+### Go 订阅选项
+
+原有 `Subscribe(ctx, key, callback)` 保持首次通知及重复订阅拒绝行为。需要不同监听方式时使用：
+
+```go
+initial, err := client.SubscribeWithOptions(lifetime, key, confhub.SubscribeOptions{
+    SkipInitial: true,     // 不通知初始状态；HTTP 读取后发生的变化仍会通知
+    RequireExisting: true, // 不存在时返回 ErrNotFound
+    Replace: true,         // 成功读取后替换相同配置的已有订阅
+}, func(ctx context.Context, value confhub.Snapshot) {
+    // 后续有效状态变化。关闭可调用 client.Stop()。
+})
+_ = initial
+_ = err
+```
+
+此接口合并初始读取与订阅注册，不需要先调用 `Get`；多地址故障切换仍可能产生多个 HTTP 请求。返回注册时的初始快照，后续通知可能在方法返回前开始执行。若应用需要依赖返回的初始内容处理通知，应在回调中等待初始内容完成初始化。替换失败保留原订阅；成功替换会取消原回调的 context，已经进入的原回调可能继续完成。传入 context 管理整个订阅生命周期，不应使用仅供一次读取的短超时 context。
+
+SDK 通过 WebSocket 推送及重连后的当前快照恢复状态，不执行 HTTP 定时轮询。每个订阅只有一个回调执行线程，网络连接与订阅取消由 SDK 统一管理。这些新增接口与选项当前仅用于 Go SDK，Python 接口保持原有行为。
 
 ## Python
 
@@ -133,7 +153,7 @@ Python 不存在抛出 `NotFound`（带 `snapshot`），无服务器且无缓存
 - 原文保持不变，返回实例 ID、配置键、流序号、编辑修订、版本、格式、命中规则和删除状态。来源 `online` / `memory` / `disk` 表示当前读取来自服务端或离线缓存。
 - 自动采集 `sys.ip` 和 `sys.hostname`，可在 `Tags` / `tags` 显式覆盖。多网卡、容器和 NAT 场景建议指定希望参与灰度路由的地址。
 - 同一客户端标签固定。切换标签请建立新客户端；缓存按规范化后的服务地址集合、标签及完整配置键隔离。地址应指向共享同一数据库的集群。
-- 每个客户端最多订阅十份配置，每个配置只有一个回调。首次订阅推送当前状态；重连后重新注册全部订阅。同一客户端最多一条有效 WebSocket 连接；新增或取消订阅会重建连接。
+- 每个客户端的订阅数量不设置固定上限，每个配置只有一个回调。首次订阅推送当前状态；重连后重新注册全部订阅。同一客户端最多一条有效 WebSocket 连接；新增或取消订阅会重建连接。
 - 正常服务故障先切换地址；全部失败后约 500ms 起指数退避，加随机抖动，最大 30s。使用服务端 Ping/Pong 检测断线。每个地址的 HTTP/握手时限默认为 2s。
 - 回调在有效版本、配置身份、命中规则、正文、格式或存在状态变化时触发。同名 beta 更新也触发回调；仅配置修订变化但当前客户端有效状态不变时不通知。快速变更或慢回调可能合并中间状态；保证收敛到最新状态，不提供每个历史版本的事件队列。
 - 按流序号及实例身份抵御晚到 HTTP/旧连接结果。beta 使用 `beta=true/version=0`，全量使用 `beta=false/version:N`；rule_id 仅表示匹配规则。beta 标识会保存到磁盘缓存，离线读取仍能识别。版本号不用于单独判断内容变化。明确删除立即清除正文及磁盘文件，保留内存删除水位；重建后的主版本 1 使用新身份。服务端和 Go/Python SDK 必须一同升级。

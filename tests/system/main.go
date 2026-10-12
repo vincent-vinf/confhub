@@ -368,7 +368,7 @@ func run() (exitCode int) {
 	flag.StringVar(&scenes, "scenarios", "business,protocol,concurrency,random,presence", "comma-separated suite names; faults requires isolated controller")
 	flag.IntVar(&r.writers, "writers", 32, "concurrent editors")
 	flag.IntVar(&r.clients, "clients", 100, "subscribing clients")
-	flag.IntVar(&r.configs, "configs", 10, "distinct configurations (1-10)")
+	flag.IntVar(&r.configs, "configs", 10, "distinct configurations (positive number)")
 	flag.IntVar(&r.rounds, "rounds", 10, "concurrency rounds")
 	flag.Int64Var(&r.seed, "seed", 20261010, "reproducible random seed")
 	flag.DurationVar(&r.timeout, "timeout", 20*time.Second, "per-request/condition timeout")
@@ -377,7 +377,7 @@ func run() (exitCode int) {
 	flag.StringVar(&r.output, "report-dir", "../../test-results/system", "report directory")
 	flag.Parse()
 	r.addresses = strings.Split(addresses, ",")
-	if addresses == "" || len(r.addresses) < 2 || r.writers < 2 || r.clients < 1 || r.configs < 1 || r.configs > 10 || r.rounds < 1 || r.timeout <= 0 || os.Getenv("CONFHUB_SYSTEM_PASSWORD") == "" {
+	if addresses == "" || len(r.addresses) < 2 || r.writers < 2 || r.clients < 1 || r.configs < 1 || r.rounds < 1 || r.timeout <= 0 || os.Getenv("CONFHUB_SYSTEM_PASSWORD") == "" {
 		fmt.Fprintln(os.Stderr, "provide at least two addresses, valid sizes, and CONFHUB_SYSTEM_PASSWORD")
 		return 2
 	}

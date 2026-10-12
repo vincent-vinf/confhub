@@ -223,8 +223,6 @@ class AsyncClient:
                 raise Closed("client closed")
             if key in self._subscriptions:
                 raise ValueError("key already subscribed")
-            if len(self._subscriptions) >= 10:
-                raise ValueError("at most ten subscriptions per client")
             sub = _Subscription(callback, asyncio.Queue(maxsize=1))
             self._subscriptions[key] = sub
             self._enqueue(sub, value)
