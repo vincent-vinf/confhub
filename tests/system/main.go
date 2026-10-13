@@ -28,11 +28,12 @@ import (
 
 type object = map[string]any
 type version struct {
-	Number      int64  `json:"number"`
-	Content     string `json:"content"`
-	Format      string `json:"format"`
-	Description string `json:"description"`
-	Source      int64  `json:"source_version"`
+	Number      int64     `json:"number"`
+	Content     string    `json:"content"`
+	Format      string    `json:"format"`
+	Description string    `json:"description"`
+	Source      int64     `json:"source_version"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 type condition struct {
 	Tag      string   `json:"tag"`
@@ -51,6 +52,7 @@ type beta struct {
 	Description string `json:"description"`
 }
 type state struct {
+	Key      sdk.Key           `json:"key"`
 	ID       string            `json:"id"`
 	Revision int64             `json:"revision"`
 	Last     int64             `json:"last_version"`
@@ -73,6 +75,7 @@ type report struct {
 	Version   string   `json:"version"`
 	Mode      string   `json:"mode"`
 	Namespace string   `json:"namespace"`
+	TestUsers []string `json:"test_users,omitempty"`
 	Instances int      `json:"instances"`
 	Writers   int      `json:"writers"`
 	Clients   int      `json:"clients"`
@@ -89,6 +92,7 @@ type runner struct {
 	created                                       bool
 	groups                                        []string
 	keys                                          []sdk.Key
+	users                                         []string
 	timeout                                       time.Duration
 	writers, clients, configs, rounds             int
 	seed                                          int64
@@ -109,29 +113,38 @@ func must(err error) {
 }
 func decode(raw []byte, value any) { must(json.Unmarshal(raw, value)) }
 func (r *runner) request(index int, method, path string, body any) (int, []byte, error) {
+	res := r.send(r.admins[index%len(r.admins)], index, method, path, body, nil)
+	return res.status, res.raw, res.err
+}
+
+// Custom sessions exercise ordinary users without replacing the admin cookies.
+func (r *runner) send(client *http.Client, index int, method, path string, body any, headers http.Header) response {
 	var raw []byte
 	var err error
 	if body != nil {
 		raw, err = json.Marshal(body)
 		if err != nil {
-			return 0, nil, err
+			return response{err: err}
 		}
 	}
 	ctx, cancel := context.WithTimeout(r.ctx, r.timeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, method, r.addresses[index%len(r.addresses)]+path, bytes.NewReader(raw))
 	if err != nil {
-		return 0, nil, err
+		return response{err: err}
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Origin", r.addresses[index%len(r.addresses)])
-	res, err := r.admins[index%len(r.admins)].Do(req)
+	for name, values := range headers {
+		req.Header[name] = values
+	}
+	res, err := client.Do(req)
 	if err != nil {
-		return 0, nil, fmt.Errorf("%s %s transport failed", method, path)
+		return response{err: fmt.Errorf("%s %s transport failed", method, path)}
 	}
 	defer res.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(res.Body, 9<<20))
-	return res.StatusCode, data, err
+	return response{status: res.StatusCode, raw: data, headers: res.Header, err: err}
 }
 func (r *runner) call(index int, method, path string, body any, out any) {
 	status, raw, err := r.request(index, method, path, body)
@@ -301,6 +314,7 @@ func (r *runner) scene(name string, fn func()) {
 	must(r.writeReport())
 }
 func (r *runner) writeReport() error {
+	r.report.TestUsers = r.users
 	if err := os.MkdirAll(r.output, 0700); err != nil {
 		return err
 	}
@@ -342,30 +356,56 @@ func (r *runner) writeReport() error {
 	return os.WriteFile(filepath.Join(r.output, "system.xml"), append([]byte(xml.Header), raw...), 0600)
 }
 func (r *runner) cleanup() {
+	var failures []string
+	attempt := func(label string, fn func()) {
+		defer func() {
+			if err := recover(); err != nil {
+				failures = append(failures, fmt.Sprintf("%s: %v", label, err))
+			}
+		}()
+		fn()
+	}
+	// Users are removed even if the scenario failed before receiving their IDs.
+	for _, name := range r.users {
+		attempt("user "+name, func() {
+			if user, found := r.findUser(name); found {
+				r.status(0, "DELETE", "/api/admin/users/"+user.ID, userBaseline(user), 200)
+			}
+			_, found := r.findUser(name)
+			require(!found, "test user remains after cleanup")
+		})
+	}
 	for _, k := range r.keys {
-		status, raw, err := r.request(0, "GET", configPath(k), nil)
-		must(err)
-		if status == 404 {
-			continue
-		}
-		require(status == 200, "cleanup read failed: %s HTTP %d", k.Name, status)
-		var s state
-		decode(raw, &s)
-		r.status(0, "DELETE", configPath(k), baseline(s), 200)
+		attempt("config "+k.Group+"/"+k.Name, func() {
+			status, raw, err := r.request(0, "GET", configPath(k), nil)
+			must(err)
+			if status == 404 {
+				return
+			}
+			require(status == 200, "cleanup read failed: HTTP %d", status)
+			var s state
+			decode(raw, &s)
+			r.status(0, "DELETE", configPath(k), baseline(s), 200)
+		})
 	}
 	if r.created {
 		for _, g := range r.groups {
-			r.status(0, "DELETE", "/api/admin/namespaces/"+r.namespace+"/groups/"+g, object{"confirmed": true}, 200)
+			attempt("group "+g, func() {
+				r.status(0, "DELETE", "/api/admin/namespaces/"+r.namespace+"/groups/"+g, object{"confirmed": true}, 200)
+			})
 		}
-		r.status(0, "DELETE", "/api/admin/namespaces/"+r.namespace, object{"confirmed": true}, 200)
+		attempt("namespace "+r.namespace, func() {
+			r.status(0, "DELETE", "/api/admin/namespaces/"+r.namespace, object{"confirmed": true}, 200)
+		})
 	}
+	require(len(failures) == 0, "cleanup failures: %s", strings.Join(failures, "; "))
 }
 func main() { os.Exit(run()) }
 func run() (exitCode int) {
 	r := &runner{}
 	var addresses, scenes string
 	flag.StringVar(&addresses, "addresses", os.Getenv("CONFHUB_SYSTEM_ADDRESSES"), "comma-separated running instance URLs (at least two)")
-	flag.StringVar(&scenes, "scenarios", "business,protocol,concurrency,random,presence", "comma-separated suite names; faults requires isolated controller")
+	flag.StringVar(&scenes, "scenarios", "business,protocol,concurrency,random,presence,users,audit,batch", "comma-separated suite names; faults requires isolated controller")
 	flag.IntVar(&r.writers, "writers", 32, "concurrent editors")
 	flag.IntVar(&r.clients, "clients", 100, "subscribing clients")
 	flag.IntVar(&r.configs, "configs", 10, "distinct configurations (positive number)")
@@ -395,7 +435,7 @@ func run() (exitCode int) {
 	r.controlToken = os.Getenv("CONFHUB_SYSTEM_CONTROL_TOKEN")
 	selected := strings.Split(scenes, ",")
 	for _, name := range selected {
-		if name != "business" && name != "protocol" && name != "concurrency" && name != "random" && name != "presence" && name != "faults" {
+		if name != "business" && name != "protocol" && name != "concurrency" && name != "random" && name != "presence" && name != "faults" && name != "users" && name != "audit" && name != "batch" {
 			fmt.Fprintln(os.Stderr, "unknown scenario", name)
 			return 2
 		}
@@ -454,6 +494,12 @@ func run() (exitCode int) {
 					r.random()
 				case "presence":
 					r.presence()
+				case "users":
+					r.permissions()
+				case "audit":
+					r.audit()
+				case "batch":
+					r.batch()
 				case "faults":
 					r.faults()
 				}

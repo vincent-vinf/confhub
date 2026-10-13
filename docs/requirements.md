@@ -1,6 +1,6 @@
 # ConfHub 需求边界
 
-本文记录已经逐项确认的第一版需求边界，关键架构见 [architecture.md](architecture.md)。本文为第一版需求基线；后端实现与验证状态见 [backend-implementation.md](backend-implementation.md)，性能目标尚未压测。
+本文记录已经逐项确认的第一版需求边界，关键架构见 [architecture.md](architecture.md)。本文为第一版需求基线；后端实现与验证状态见 [backend-implementation.md](backend-implementation.md)，资源限制压测方案与实测范围见 [压测指南](load-testing.md)。
 
 ## 产品目标
 
@@ -105,7 +105,7 @@
 
 ## 规模与性能目标
 
-这些是保留供后续验证的设计目标，并非已经通过验证的性能承诺。当前阶段不编写、执行或展开压测流程。
+这些是保留供后续验证的设计目标，并非已经通过验证的性能承诺。现已新增独立资源限制压测，方案与实测范围见 [load-testing.md](load-testing.md)。
 
 - 3 个服务实例，共 10,000 个客户端长连接。
 - 每实例空载 RSS 不超过 64 MiB；上述负载下 RSS 不超过 256 MiB。数据库资源单独计算。

@@ -29,6 +29,10 @@ test-full:
 test-system:
 	go -C tests/system run -race .
 
+# Separate performance sweep in an owned resource-limited Compose project.
+load-test:
+	python3 tests/load/run.py
+
 test-fuzz:
 	CGO_ENABLED=1 go test ./internal/config -run '^$$' -fuzz '^FuzzIPSingletonRange$$' -fuzztime=5s -parallel=2
 	CGO_ENABLED=1 go test ./internal/config -run '^$$' -fuzz '^FuzzNamesAndTextValidation$$' -fuzztime=5s -parallel=2
@@ -78,6 +82,7 @@ sdk-check:
 	$(SDK_PYTHON) -m ruff check --config sdk/python/pyproject.toml sdk/python/src sdk/python/tests sdk/test-integration.py
 	$(SDK_PYTHON) -m ruff check --config sdk/python/pyproject.toml tests
 	go -C tests/system vet ./...
+	go -C tests/load vet ./...
 
 sdk-integration:
 	python3 sdk/test-integration.py --python $(abspath $(SDK_PYTHON))
@@ -90,4 +95,4 @@ docker-image-build-local:
 		--build-arg IMAGE_TAG=$(IMAGE_TAG) \
 		-t $(DOCKER_IMAGE):$(IMAGE_TAG) .
 
-.PHONY: go-mod-download test test-unit test-integration test-race vet build run clean docker-image-build-local frontend-install frontend-build frontend-test frontend-check frontend-e2e sdk-test sdk-check sdk-integration sdk-unit test-full test-system test-fuzz
+.PHONY: go-mod-download test test-unit test-integration test-race vet build run clean docker-image-build-local frontend-install frontend-build frontend-test frontend-check frontend-e2e sdk-test sdk-check sdk-integration sdk-unit test-full test-system test-fuzz load-test

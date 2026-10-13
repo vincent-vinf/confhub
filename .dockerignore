@@ -15,6 +15,7 @@ storage
 tmp
 *.log
 coverage.out
+test-results
 frontend/node_modules
 frontend/dist
 frontend/test-results

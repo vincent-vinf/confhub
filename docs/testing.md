@@ -1,6 +1,6 @@
 # 测试运行指南
 
-本文说明 [测试计划](testing-plan.md) 已落地的入口。测试依据公开业务和协议，不以覆盖率替代关键行为验证。PostgreSQL 是本阶段唯一真实数据库验收后端，不宣称 MySQL 或容量/资源指标已通过。
+本文说明 [测试计划](testing-plan.md) 已落地的入口。测试依据公开业务和协议，不以覆盖率替代关键行为验证。PostgreSQL 是本阶段唯一真实数据库验收后端，MySQL 尚未通过真实数据库验收。性能验证使用独立入口，资源档位与实测范围见 [压测指南](load-testing.md)。
 
 ## 环境准备
 
@@ -44,9 +44,9 @@ python3 tests/run.py --report-dir test-results/acceptance --coverage-gates
 
 这套环境验证真实进程和数据库链路，服务进程也受 race 检查。数据库实例、代理和故障控制器均为本次运行所有，不操作现有 Compose 服务。
 
-默认执行 `unit,integration,system,frontend` 四层，系统套件执行 `business,protocol,concurrency,random,presence,faults`。默认并发为 32 写入者、100 订阅客户端、10 配置、10 轮，随机种子为 20261010。这是正确性回归，不是容量压测。
+默认执行 `unit,integration,system,frontend` 四层，系统套件执行 `business,protocol,concurrency,random,presence,users,audit,batch,faults`。默认并发为 32 写入者、100 订阅客户端、10 配置、10 轮，随机种子为 20261010。这是正确性回归，不是容量压测。
 
-系统层之后还执行一次连接模式的 `business,protocol` 回归：仅传入实例地址和凭据，移除故障控制器环境变量，以验证同一 Go 程序可直接测试运行中的系统。该报告单独放在 `connected-system/`。
+系统层之后还执行一次连接模式的 `business,protocol,users,audit,batch` 回归：仅传入实例地址和凭据，移除故障控制器环境变量，以验证同一 Go 程序可直接测试运行中的系统。该报告单独放在 `connected-system/`，沿用传入的并发规模、轮次、种子和超时。
 
 针对性运行：
 
@@ -56,6 +56,7 @@ python3 tests/run.py --layers integration
 python3 tests/run.py --layers system --scenarios business,protocol
 python3 tests/run.py --layers system --scenarios concurrency,random \
   --writers 32 --clients 100 --configs 10 --rounds 10 --seed 7
+python3 tests/run.py --layers system --scenarios users,audit,batch --rounds 10
 python3 tests/run.py --layers system --scenarios faults
 python3 tests/run.py --layers frontend
 ```
@@ -73,7 +74,7 @@ make test-system
 unset CONFHUB_SYSTEM_PASSWORD
 ```
 
-地址和密码也可由终端的已有环境提供，不需要写进配置文件。Go 程序默认使用两种 SDK 验证业务、协议、并发、随机操作和在线客户端；至少要求两个实例地址。跨实例目标通过选择不同实际端点实现，不以单实例结果代替。
+地址和密码也可由终端的已有环境提供，不需要写进配置文件。Go 程序默认验证业务、协议、并发、随机操作、在线客户端、多用户权限、审计和批量操作，客户端链路使用正式 Go/Python SDK；至少要求两个实例地址。跨实例目标通过选择不同实际端点实现，不以单实例结果代替。
 
 自定义场景、规模、解释器及报告位置：
 
@@ -87,9 +88,11 @@ go -C tests/system run -race . \
   --report-dir ../../test-results/connected
 ```
 
-程序仅通过管理 HTTP API 创建自己的 namespace/group/config，通过正式 Go SDK 及 Python SDK JSON-lines worker 获取和订阅。不引用服务端内部包、不读取数据库作为业务断言，也不修改全局密码或停止外部服务。连接模式默认不包含故障套件；强行选择 faults 而没有隔离控制器时，程序在操作数据前明确失败。
+程序仅通过管理 HTTP API 创建自己的 namespace/group/config 和临时普通用户，通过正式 Go SDK 及 Python SDK JSON-lines worker 获取和订阅。不引用服务端内部包、不读取数据库作为业务断言，也不修改全局密码或停止外部服务。连接模式默认不包含故障套件；强行选择 faults 而没有隔离控制器时，程序在操作数据前明确失败。
 
-请使用测试部署或允许创建/删除测试数据的环境。中断或失败后的清理有独立结果，残留 namespace 可从报告定位；清理失败返回非零退出码。
+请使用测试部署或允许创建/删除测试数据的环境。中断或失败后的清理有独立结果，残留 namespace 和测试用户名可从报告定位；单项清理失败仍尝试清理其他资源，最后汇总错误并返回非零退出码。审计记录按系统策略保留，测试不删除它们；连接模式需要允许留下这些测试操作记录。
+
+压测入口独立于正确性回归，使用 `make load-test`；资源档位、开放负载、延迟口径与容量结果见 [压测指南](load-testing.md)。
 
 ## 场景与断言
 
@@ -98,6 +101,9 @@ go -C tests/system run -race . \
 - 并发：同基准主/beta 写入单赢家、全量与规则竞争、beta 与最后规则删除竞争、删除与旧编辑竞争；不同配置并行、连续发布/100 客户端收敛、慢回调及 SDK 生命周期竞态。
 - 随机：固定种子的 60 步操作序列，用独立内容账本和标签样例核对普通/灰度客户端，不复用生产解析器。
 - 在线：仅 WebSocket 入列表、跨实例已发送信息、内置标签/字面值建议、断连最终移除。
+- 多用户（`users`）：跨实例只读访问和组织列表过滤、默认拒绝与禁止自授权、独立客户端查看权限、批量源/目标权限整批拒绝、授权即时升降、无授权用户、并发权限修改单赢家；禁用/重启用、重置/自改密码和删除后旧会话失效。测试固定重放原 JWT，即使响应清除 Cookie 也继续验证服务端撤销。
+- 审计（`audit`）：请求 ID 对应单条记录，成功/401/403/409 结果、身份/IP/时间/耗时、失败登录身份、伪造代理头拒绝、原始响应敏感信息排除；跨实例组合筛选、微秒时间边界、插入期间游标稳定、非法筛选、普通用户拒绝、账号与配置删除后保留快照、后台查询与匿名 GET 排除。
+- 批量（`batch`）：目标重名与过期基准导致整批回滚且不通知，移动保留身份/历史及时间/规则/beta；Go/Python 普通与灰度订阅验证原键删除、目标键生效与批量删除；跨实例移动/删除同批竞争单赢家，并检查整批最终状态；通过公开在线列表等待四个真实 WebSocket 的源/目标订阅就绪。
 - 故障：真实慢 WebSocket 写入超时、实例异常退出与租约过期、数据库不可用与缓存、断线期间连续发布、实际日志清理后恢复、磁盘缓存重启、缺少 Pong 超时、删除后离线缓存不复活。
 - 存储专项：32 个 beta 编辑者只产生一次变更、数据库事件写入失败时完整回滚、清理与历史复制/回退竞争只产生合法原子结果。
 
@@ -114,7 +120,7 @@ Go 使用语句覆盖率，Python 使用语句/行覆盖率。Go 的 `backend-me
 报告位于 `test-results/run-*`，主要文件：
 
 - `layers.json/layers.xml`：各层结果、耗时、失败状态。
-- `system/system.json/system.xml`：系统场景、配置规模、随机种子、测试 namespace、代码 HEAD 和清理结果。
+- `system/system.json/system.xml`：系统场景、配置规模、随机种子、测试 namespace、测试用户名、代码 HEAD 和清理结果。
 - `backend.out/process.out/backend-merged.out/sdk.out`、`python-coverage.json`、`coverage-summary.json`：覆盖率原始数据及统计。
 - `frontend-coverage/`：逻辑覆盖率；浏览器报告和 trace 仍使用 `frontend/playwright-report/`、`frontend/test-results/`。
 - 各层、三个实例及 Python worker 日志；日志不记录管理员密码或非测试配置正文。
@@ -225,3 +231,30 @@ Go SDK 新增 `SubscribeWithOptions`，合并初始读取和订阅注册，支�
 - 前端 49 个单元测试、类型检查、生产构建及格式检查通过。完整 Playwright 29 个流程通过，包含新增审计筛选、分页、详情、用户删除后保留身份、普通用户限制，以及明暗主题、375px 布局和 axe 检查。
 - 完整回归中发现原有标签键盘用例的时序失败；增加列表关闭及逐次按键结果等待后，完整回归通过。审计表头的手机溢出已修复；主题截图和无障碍验证使用减少动态效果，避免扫描切换中的颜色。
 - 已检查桌面浅色及手机深色审计截图。测试容器和进程已清理；MySQL 未运行集成测试，未进行压测。
+
+
+## 黑盒场景扩展（2026-10-13）
+
+新增 `users,audit,batch` 三个场景，默认入口和连接模式都执行。场景通过公开 HTTP API 与正式 Go/Python SDK 检查，不使用服务端内部包或数据库查询作为业务断言。测试账号使用随机密码，报告记录其名称；清理逐项执行，失败仍继续清理其余资源，审计记录按系统策略保留。
+
+验证命令：
+
+```sh
+python3 tests/run.py --layers system --scenarios users,audit,batch --rounds 10
+python3 tests/run.py --layers integration,system --coverage-gates
+```
+
+专项报告为 `test-results/run-20261013-024757`，三个新增场景的隔离和连接模式均通过，批量移动/删除竞争各执行 10 轮。完整后端与 SDK 回归报告为 `test-results/run-20261013-024945`，使用指定 PostgreSQL 17 镜像、三个真实实例、32 写入者、100 客户端、10 配置、10 轮及默认种子。业务、协议、并发、随机、在线客户端、三个新增场景、六项故障恢复，以及独立连接模式全部通过；Go race/vet、Python mypy/ruff 和覆盖率门槛通过。
+
+| 范围 | 覆盖率 |
+| --- | --- |
+| 后端（含真实进程） | 87.07%，1920/2205 条语句 |
+| 业务规则 | 100%，111/111 条语句 |
+| Go SDK | 87.95%，321/365 条语句 |
+| Python SDK | 91.56%，412/450 行 |
+
+首次扩展回归 `test-results/run-20261013-024207` 的单元层通过，后续批量场景出现删除通知超时，失败报告保留。当时测试仅等待可能来自 GET 的初始回调；增加公开在线列表的 WebSocket 订阅就绪屏障后通过，未放宽删除身份断言。较早的专项运行发现发布响应与数据库时间精度不同，已改用公开 GET 的持久化基准比较历史。
+
+会话测试固定重放最初 JWT，覆盖改密响应清除 Cookie 后的服务端撤销，并将同一会话用于不同实例地址。审计脱敏直接检查原始 JSON，避免测试模型忽略未知字段而漏检。
+
+本次验收范围为后端、两个 SDK 及黑盒程序。临时账号、namespace、配置、服务进程与 PostgreSQL 容器均清理完成；已有 Compose 服务保持运行。

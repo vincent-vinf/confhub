@@ -2,7 +2,7 @@
 
 轻量配置中心，使用 Go/Gin、React、HTTP GET 与 WebSocket。支持不可变主版本、配置级唯一可覆盖的灰度 beta、全量回退、乐观锁、多用户 JWT 登录和 namespace/group 读写授权，以及 PostgreSQL/MySQL 存储。支持 IP 区间灰度、在线客户端只读查看、标签补全和操作审计。
 
-需求与架构见 [docs/requirements.md](docs/requirements.md) 和 [docs/architecture.md](docs/architecture.md)，接口见 [docs/backend-api.md](docs/backend-api.md)，控制台交互和验证见 [docs/frontend-implementation.md](docs/frontend-implementation.md)。[Go/Python SDK](docs/sdk.md) 支持获取、订阅、自动重连和可选离线缓存。性能目标尚未压测。
+需求与架构见 [docs/requirements.md](docs/requirements.md) 和 [docs/architecture.md](docs/architecture.md)，接口见 [docs/backend-api.md](docs/backend-api.md)，控制台交互和验证见 [docs/frontend-implementation.md](docs/frontend-implementation.md)。[Go/Python SDK](docs/sdk.md) 支持获取、订阅、自动重连和可选离线缓存。资源限制压测方案与实测范围见 [压测指南](docs/load-testing.md)。
 
 ## 启动
 
@@ -62,6 +62,8 @@ docker compose --profile ha up -d --build
 
 Compose 自动读取根目录 `.env`，并将其中的应用参数传入各实例；已导出的同名环境变量优先于 `.env` 中用于 Compose 插值的值。数据库类型和 DSN 由所选 Compose 文件生成。真实 `.env` 已被 Git 和 Docker 构建上下文忽略，只提交 `.env.example`。
 
+默认每个应用容器限制 1 vCPU/1 GiB，数据库限制 1 vCPU/2 GiB，Go 内存软目标为 768 MiB；可通过 `.env` 的 `CONFHUB_APP_CPUS/APP_MEMORY/APP_GO_MEMORY/DB_CPUS/DB_MEMORY` 调整，重建容器后生效。
+
 默认端口 8080、8081、8082，可通过 `CONFHUB_PORT/PORT2/PORT3` 修改。数据库通过本地目录挂载持久化：PostgreSQL 使用 `./data/postgres`，MySQL 使用 `./data/mysql`，启动时自动创建目录；`data/` 已被 Git 和 Docker 构建上下文忽略。已有命名卷的数据需先迁移到对应目录，不会自动复制。单个数据库容器不提供数据库 HA。默认 PostgreSQL 镜像为 `registry.cn-hangzhou.aliyuncs.com/bodesi/postgres:17`。模板将数据库密码放入 DSN，使用不包含 URI 保留字符的密码；自定义密码可调整模板中的 DSN 并进行 URI 编码。
 
 MySQL 使用 `docker compose -f compose.mysql.yaml …`，在 `.env` 中额外设置 `CONFHUB_DB_ROOT_PASSWORD`。本阶段按用户要求只运行 PostgreSQL 集成测试，MySQL 迁移/适配器尚未通过真实 MySQL 测试。
@@ -86,7 +88,7 @@ CONFHUB_DEV_BACKEND=http://127.0.0.1:8081 npm --prefix frontend run dev
 
 ## 测试
 
-范围与验收标准见 [测试计划](docs/testing-plan.md)，执行方式及验证记录见 [测试运行指南](docs/testing.md)。现已提供 Go 程序配合两种 SDK 测试运行中系统，以及隔离 PostgreSQL/三实例、并发、故障和覆盖率检查入口。
+范围与验收标准见 [测试计划](docs/testing-plan.md)，执行方式及验证记录见 [测试运行指南](docs/testing.md)。现已提供 Go 程序配合两种 SDK 测试运行中系统，以及隔离 PostgreSQL/三实例、并发、故障和覆盖率检查入口。黑盒场景包含多用户权限、审计筛选和批量移动/删除。
 
 ```sh
 # 需先安装 sdk/python[dev]、frontend 依赖及 Chromium：
@@ -95,7 +97,7 @@ make test-full       # 隔离环境中的完整回归，含覆盖率门槛
 make test-fuzz       # 两组各 5 秒的 fuzz
 ```
 
-测试运行器不读取真实 `.env` 或写入 `data/`，报告位于被 Git 忽略的 `test-results/`。运行中系统使用 `make test-system`，通过环境变量传入实例地址和密码，仅修改本次创建的独立 namespace；详细用法见运行指南。
+测试运行器不读取真实 `.env` 或写入 `data/`，报告位于被 Git 忽略的 `test-results/`。运行中系统使用 `make test-system`，通过环境变量传入实例地址和密码，仅修改本次创建的独立 namespace 和临时用户，审计记录按系统策略保留；详细用法见运行指南。
 
 ```sh
 make test-unit
@@ -115,6 +117,6 @@ race 检查要求 CGO 和 C 编译器，`make test-race` 会显式启用 CGO；�
 
 `make test` 执行全部测试；未设置测试 DSN 时数据库测试明确 skip。`make test-integration` 和 `make test-race` 要求 DSN 存在，防止误把跳过集成测试当作通过。测试数据库 DSN 使用 PostgreSQL URL 格式。
 
-测试覆盖主版本保存、唯一 beta 原位覆盖、多规则共享与来源选择、全量回退、并发冲突、删除重建、组织约束、主历史清理不影响 beta、日志清理，以及 HTTP 认证/确认和 WebSocket 跨实例同步、数据库故障和日志缺口补偿。没有压测脚本或负载容器。
+测试覆盖主版本保存、唯一 beta 原位覆盖、多规则共享与来源选择、全量回退、并发冲突、删除重建、组织约束、主历史清理不影响 beta、日志清理，以及 HTTP 认证/确认和 WebSocket 跨实例同步、数据库故障和日志缺口补偿。独立资源限制压测使用 `make load-test`，方案、参数与实测结果见 [压测指南](docs/load-testing.md)。
 
 前端端到端测试需要 Docker、Go、Node 和 Chromium，自动构建前端及 Go 服务，使用指定 PostgreSQL 17 镜像创建临时数据库，在 `127.0.0.1:18080` 测试真实 HTTP/数据库流程。数据库使用随机宿主端口，正常退出时删除测试容器；测试报告、截图及失败 trace 保存在被 Git 忽略的 `frontend/playwright-report` 和 `frontend/test-results`。Linux 截图环境需安装中文字体（例如 `fonts-noto-cjk`）。

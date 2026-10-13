@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sync"
 
 	sdk "github.com/vincent-vinf/confhub/sdk/go"
@@ -13,9 +14,10 @@ type operation struct {
 	body         object
 }
 type response struct {
-	status int
-	raw    []byte
-	err    error
+	status  int
+	raw     []byte
+	err     error
+	headers http.Header
 }
 
 func (r *runner) race(ops []operation) []response {

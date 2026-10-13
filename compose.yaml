@@ -2,9 +2,17 @@ x-app: &app
   build: .
   image: confhub:dev
   restart: unless-stopped
+  cpus: ${CONFHUB_APP_CPUS:-1.0}
+  mem_limit: ${CONFHUB_APP_MEMORY:-1g}
+  memswap_limit: ${CONFHUB_APP_MEMORY:-1g}
+  ulimits:
+    nofile:
+      soft: 65536
+      hard: 65536
   env_file:
     - .env
   environment: &app-env
+    GOMEMLIMIT: ${CONFHUB_APP_GO_MEMORY:-768MiB}
     CONFHUB_DATABASE: postgres
     CONFHUB_DSN: postgres://confhub:${CONFHUB_DB_PASSWORD:?set CONFHUB_DB_PASSWORD in .env}@db:5432/confhub?sslmode=disable
     CONFHUB_ADMIN_PASSWORD: ${CONFHUB_ADMIN_PASSWORD:?set CONFHUB_ADMIN_PASSWORD in .env}
@@ -21,6 +29,9 @@ x-app: &app
 services:
   db:
     image: registry.cn-hangzhou.aliyuncs.com/bodesi/postgres:17
+    cpus: ${CONFHUB_DB_CPUS:-1.0}
+    mem_limit: ${CONFHUB_DB_MEMORY:-2g}
+    memswap_limit: ${CONFHUB_DB_MEMORY:-2g}
     environment:
       POSTGRES_DB: confhub
       POSTGRES_USER: confhub

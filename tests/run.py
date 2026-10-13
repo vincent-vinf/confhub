@@ -344,7 +344,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--layers", default="unit,integration,system,frontend")
     parser.add_argument(
-        "--scenarios", default="business,protocol,concurrency,random,presence,faults"
+        "--scenarios",
+        default="business,protocol,concurrency,random,presence,users,audit,batch,faults",
     )
     parser.add_argument("--writers", type=int, default=32)
     parser.add_argument("--clients", type=int, default=100)
@@ -367,10 +368,7 @@ def main():
         layer not in {"unit", "integration", "system", "frontend"} for layer in layers
     ):
         parser.error("unknown layer")
-    if (
-        min(args.writers, args.clients, args.configs, args.rounds) < 1
-        or args.writers < 2
-    ):
+    if min(args.writers, args.clients, args.configs, args.rounds) < 1 or args.writers < 2:
         parser.error("invalid test sizes")
     if (
         any(layer in {"unit", "integration", "system"} for layer in layers)
@@ -573,13 +571,25 @@ def main():
                         "-race",
                         ".",
                         "--scenarios",
-                        "business,protocol",
+                        "business,protocol,users,audit,batch",
                         "--python",
                         args.python,
                         "--python-worker",
                         str(ROOT / "tests/python_worker.py"),
                         "--report-dir",
                         str(report / "connected-system"),
+                        "--timeout",
+                        "35s",
+                        "--writers",
+                        str(args.writers),
+                        "--clients",
+                        str(args.clients),
+                        "--configs",
+                        str(args.configs),
+                        "--rounds",
+                        str(args.rounds),
+                        "--seed",
+                        str(args.seed),
                     ],
                     ROOT / "tests/system",
                     connected_env,

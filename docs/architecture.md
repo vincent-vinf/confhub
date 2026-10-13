@@ -1,6 +1,6 @@
 # ConfHub 关键架构
 
-需求边界见 [requirements.md](requirements.md)。本文汇总已经逐项明确的关键架构，具体方法签名、DDL 和依赖版本在实现阶段确定。后端实现与验证状态见 [backend-implementation.md](backend-implementation.md)，不编写或运行压测流程。
+需求边界见 [requirements.md](requirements.md)。本文汇总已经逐项明确的关键架构，具体方法签名、DDL 和依赖版本在实现阶段确定。后端实现与验证状态见 [backend-implementation.md](backend-implementation.md)，独立资源限制压测见 [load-testing.md](load-testing.md)。
 
 ## 部署与认证
 
@@ -113,7 +113,7 @@ SDK 以原文快照和版本元数据为基础，提供获取、订阅、取消�
 
 提供同一应用镜像的单实例及多实例 Compose 部署方式，并分别支持 PostgreSQL、MySQL 后端。多实例共享数据库和 JWT 签名密钥；只为数据库配置持久卷，实例缓存和消费游标可重建。客户端可配置多个服务地址，不强制部署额外负载均衡组件；数据库自身高可用仍由部署环境提供，单个 Compose 数据库容器不代表数据库高可用。
 
-后续验证环境也使用 Docker Compose。保留基线为每个服务节点 4 vCPU、1 GiB 可用内存，数据库 4 vCPU、8 GiB、SSD，节点间 1 Gbps、RTT 不超过 1 ms；数据库与负载生成器独立部署。Compose 本身不能保证跨主机网络规格。进程 RSS 和 P99 指标仍是未验证目标，当前不制作压测脚本、步骤或负载容器。
+后续验证环境也使用 Docker Compose。保留基线为每个服务节点 4 vCPU、1 GiB 可用内存，数据库 4 vCPU、8 GiB、SSD，节点间 1 Gbps、RTT 不超过 1 ms；数据库与负载生成器独立部署。Compose 本身不能保证跨主机网络规格。资源限制、隔离压测脚本及实测范围见 [load-testing.md](load-testing.md)。
 
 ## Module 与 Interface
 
@@ -147,7 +147,7 @@ SDK 以原文快照和版本元数据为基础，提供获取、订阅、取消�
 - [iofs 示例](https://github.com/golang-migrate/migrate/blob/master/source/iofs/example_test.go)：接收 fs.FS，可用于 SQL 来源；不能把 iofs URL 直接当作受支持的来源 URL。
 - [asyncio 多线程](https://docs.python.org/3/library/asyncio-dev.html#concurrency-and-multithreading)、[task 调度](https://docs.python.org/3/library/asyncio-task.html)、[Runner](https://docs.python.org/3/library/asyncio-runner.html)：跨线程提交需线程安全调度，已有 event loop 内不能调用 asyncio.run。
 
-P99 不超过 300 ms 的目标范围是数据库事务提交到目标 SDK 获得新内容，包含跨实例传播和 SDK 调度，而不是仅测通知到达。当前尚未压测。
+P99 不超过 300 ms 的目标范围是数据库事务提交到目标 SDK 获得新内容，包含跨实例传播和 SDK 调度，而不是仅测通知到达。压测使用发布请求开始到 SDK 回调的保守上界，实际档位与结果见 [load-testing.md](load-testing.md)。
 
 ## 在线连接展示与标签建议
 

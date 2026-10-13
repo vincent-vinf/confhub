@@ -181,4 +181,4 @@ python3 sdk/test-integration.py
 python3 sdk/test-integration.py --full
 ```
 
-性能目标尚未压测；SDK 尚未发布到包索引或远程版本标签。
+已增加 Go SDK 的资源限制压测，方案与实测范围见 [load-testing.md](load-testing.md)；SDK 尚未发布到包索引或远程版本标签。

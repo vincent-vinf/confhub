@@ -3,9 +3,17 @@ x-app: &app
   build: .
   image: confhub:dev
   restart: unless-stopped
+  cpus: ${CONFHUB_APP_CPUS:-1.0}
+  mem_limit: ${CONFHUB_APP_MEMORY:-1g}
+  memswap_limit: ${CONFHUB_APP_MEMORY:-1g}
+  ulimits:
+    nofile:
+      soft: 65536
+      hard: 65536
   env_file:
     - .env
   environment:
+    GOMEMLIMIT: ${CONFHUB_APP_GO_MEMORY:-768MiB}
     CONFHUB_DATABASE: mysql
     CONFHUB_DSN: confhub:${CONFHUB_DB_PASSWORD:?set CONFHUB_DB_PASSWORD in .env}@tcp(db:3306)/confhub
     CONFHUB_ADMIN_PASSWORD: ${CONFHUB_ADMIN_PASSWORD:?set CONFHUB_ADMIN_PASSWORD in .env}
@@ -22,6 +30,9 @@ x-app: &app
 services:
   db:
     image: docker.m.daocloud.io/library/mysql:8.4
+    cpus: ${CONFHUB_DB_CPUS:-1.0}
+    mem_limit: ${CONFHUB_DB_MEMORY:-2g}
+    memswap_limit: ${CONFHUB_DB_MEMORY:-2g}
     environment:
       MYSQL_DATABASE: confhub
       MYSQL_USER: confhub

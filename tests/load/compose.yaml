@@ -1,0 +1,51 @@
+# Owned load environment: independent project, random loopback ports and named volume.
+x-app: &app
+  build:
+    context: ${CONFHUB_LOAD_CONTEXT:?provided by load runner}
+  image: ${CONFHUB_LOAD_IMAGE:?provided by load runner}
+  cpus: ${CONFHUB_APP_CPUS:-1.0}
+  mem_limit: ${CONFHUB_APP_MEMORY:-1g}
+  memswap_limit: ${CONFHUB_APP_MEMORY:-1g}
+  restart: "no"
+  ulimits:
+    nofile:
+      soft: 65536
+      hard: 65536
+  environment:
+    GOMEMLIMIT: ${CONFHUB_APP_GO_MEMORY:-768MiB}
+    CONFHUB_DATABASE: postgres
+    CONFHUB_DSN: postgres://confhub:${CONFHUB_DB_PASSWORD:?}@db:5432/confhub?sslmode=disable
+    CONFHUB_ADMIN_PASSWORD: ${CONFHUB_ADMIN_PASSWORD:?}
+    CONFHUB_JWT_SECRET: ${CONFHUB_JWT_SECRET:?}
+    CONFHUB_POLL_INTERVAL: ${CONFHUB_POLL_INTERVAL:-100ms}
+    CONFHUB_CLEANUP_INTERVAL: ${CONFHUB_CLEANUP_INTERVAL:-1m}
+    CONFHUB_HISTORY_LIMIT: ${CONFHUB_HISTORY_LIMIT:-100}
+  ports: ["127.0.0.1::8080"]
+  depends_on:
+    db:
+      condition: service_healthy
+services:
+  db:
+    image: registry.cn-hangzhou.aliyuncs.com/bodesi/postgres:17
+    cpus: ${CONFHUB_DB_CPUS:-1.0}
+    mem_limit: ${CONFHUB_DB_MEMORY:-2g}
+    memswap_limit: ${CONFHUB_DB_MEMORY:-2g}
+    restart: "no"
+    environment:
+      POSTGRES_DB: confhub
+      POSTGRES_USER: confhub
+      POSTGRES_PASSWORD: ${CONFHUB_DB_PASSWORD:?}
+    volumes: ["load-db:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U confhub -d confhub"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  app:
+    <<: *app
+  app2:
+    <<: *app
+  app3:
+    <<: *app
+volumes:
+  load-db:
