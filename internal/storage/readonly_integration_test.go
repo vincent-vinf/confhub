@@ -4,11 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/vincent-vinf/confhub/internal/config"
+	"github.com/vincent-vinf/confhub/internal/replication"
 	"github.com/vincent-vinf/confhub/internal/storage"
 	"github.com/vincent-vinf/confhub/internal/testutil"
 )
@@ -56,14 +58,23 @@ func TestReadOnlyStoreRejectsManagementAndBackgroundWrites(t *testing.T) {
 			_, e := s.UpdateUser(ctx, u.ID, u.Revision, storage.UserInput{Enabled: true, SystemAdmin: true})
 			return e
 		},
-		"delete-user":      func() error { return s.DeleteUser(ctx, u.ID, u.Revision) },
-		"cleanup":          func() error { _, e := s.Cleanup(ctx, "owner", 1, time.Second, 1); return e },
-		"presence":         func() error { return s.SyncPresence(ctx, "owner", nil, time.Second) },
-		"remove-presence":  func() error { return s.RemovePresence(ctx, "owner") },
-		"cleanup-presence": func() error { return s.CleanupPresence(ctx) },
-		"begin-audit":      func() error { _, e := s.BeginAudit(ctx, storage.Audit{}); return e },
-		"identify-audit":   func() error { return s.IdentifyAudit(ctx, 1, u) },
-		"finish-audit":     func() error { return s.FinishAudit(ctx, storage.Audit{ID: 1}) },
+		"delete-user":             func() error { return s.DeleteUser(ctx, u.ID, u.Revision) },
+		"cleanup":                 func() error { _, e := s.Cleanup(ctx, "owner", 1, time.Second, 1); return e },
+		"presence":                func() error { return s.SyncPresence(ctx, "owner", nil, time.Second) },
+		"remove-presence":         func() error { return s.RemovePresence(ctx, "owner") },
+		"cleanup-presence":        func() error { return s.CleanupPresence(ctx) },
+		"begin-audit":             func() error { _, e := s.BeginAudit(ctx, storage.Audit{}); return e },
+		"identify-audit":          func() error { return s.IdentifyAudit(ctx, 1, u) },
+		"finish-audit":            func() error { return s.FinishAudit(ctx, storage.Audit{ID: 1}) },
+		"replication-source-init": func() error { _, e := s.Watermark(ctx); return e },
+		"mirror-lease": func() error {
+			_, _, e := s.AcquireMirrorLease(ctx, "reader", time.Minute)
+			return e
+		},
+		"release-mirror-lease": func() error { return s.ReleaseMirrorLease(ctx, replication.Lease{}) },
+		"apply-mirror": func() error {
+			return s.ApplyMirror(ctx, replication.Lease{}, replication.Manifest{}, strings.NewReader(""))
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := action(); !errors.Is(err, storage.ErrReadOnly) {
@@ -98,7 +109,7 @@ func TestSchemaCheckUsesSelectOnlyAndRejectsIncompleteSchemas(t *testing.T) {
 	defer db.Close()
 	for _, tc := range []struct{ sql, message string }{
 		{"UPDATE schema_migrations SET dirty=true", "dirty"},
-		{"UPDATE schema_migrations SET dirty=false,version=5", "expected 6"},
+		{"UPDATE schema_migrations SET dirty=false,version=5", fmt.Sprintf("expected %d", storage.SchemaVersion)},
 		{"DELETE FROM schema_migrations", "read schema version"},
 		{"DROP TABLE schema_migrations", "read schema version"},
 	} {

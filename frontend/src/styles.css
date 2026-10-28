@@ -2664,3 +2664,22 @@ textarea:disabled,
     padding: 16px;
   }
 }
+/* Edge console reuses the management layout with a read-only status view. */
+.sync-metadata {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 24px;
+  padding: 24px;
+  margin: 0;
+}
+.sync-metadata div {
+  min-width: 0;
+}
+.sync-metadata dt {
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.sync-metadata dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}

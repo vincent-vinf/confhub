@@ -1,0 +1,109 @@
+syntax = "proto3";
+
+package confhub.replication.v2;
+
+option go_package = "github.com/vincent-vinf/confhub/internal/replication/wire";
+
+import "google/protobuf/timestamp.proto";
+
+message Key {
+  string namespace = 1;
+  string group = 2;
+  string name = 3;
+}
+
+message Version {
+  int64 number = 1;
+  string content = 2;
+  string format = 3;
+  string description = 4;
+  string action = 5;
+  int64 source_version = 6;
+  google.protobuf.Timestamp created_at = 7;
+  repeated string references = 8;
+}
+
+message Condition {
+  string tag = 1;
+  string operator = 2;
+  repeated string values = 3;
+}
+
+message Rule {
+  string id = 1;
+  string name = 2;
+  bool enabled = 3;
+  repeated Condition conditions = 4;
+}
+
+message Beta {
+  string content = 1;
+  string format = 2;
+  string description = 3;
+  google.protobuf.Timestamp updated_at = 4;
+}
+
+message State {
+  int64 sequence = 1;
+  string id = 2;
+  Key key = 3;
+  int64 revision = 4;
+  int64 last_version = 5;
+  int64 global_version = 6;
+  repeated Rule rules = 7;
+  Beta beta = 8;
+  map<int64, Version> versions = 9;
+}
+
+// Records form a length-delimited stream. An absent state is a deletion.
+message Record {
+  Key key = 1;
+  State state = 2;
+}
+
+message Cursor {
+  string source = 1;
+  int64 sequence = 2;
+}
+
+message Manifest {
+  Cursor cursor = 1;
+  int64 after = 2;
+  bool full = 3;
+  int64 count = 4;
+}
+
+enum FrameType {
+  FRAME_TYPE_UNSPECIFIED = 0;
+  FRAME_TYPE_WATERMARK = 1;
+  FRAME_TYPE_FETCH = 2;
+  FRAME_TYPE_BEGIN = 3;
+  FRAME_TYPE_CHUNK = 4;
+  FRAME_TYPE_END = 5;
+  FRAME_TYPE_CHUNK_RECEIVED = 6;
+  FRAME_TYPE_SEEN = 7;
+  FRAME_TYPE_APPLIED = 8;
+}
+
+message Frame {
+  uint32 version = 1;
+  FrameType type = 2;
+  string request_id = 3;
+  Cursor cursor = 4;
+  Manifest manifest = 5;
+  int64 index = 6;
+  bytes data = 7;
+  int64 bytes = 8;
+  bytes digest = 9;
+}
+
+message OpenRequest {
+  uint32 version = 1;
+  string session = 2;
+  string token = 3;
+}
+
+message OpenReply {
+  uint32 version = 1;
+  bool ok = 2;
+}

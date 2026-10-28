@@ -42,7 +42,15 @@ def main():
             "mode: atomic\n"
             + "".join(f"{name} {size} {count}\n" for name, (size, count) in sorted(blocks.items()))
         )
-        summary["backend"] = percentage(blocks)
+        # Compiler output is retained in raw profiles and reported separately.
+        # Apply the existing gate to maintained code, rather than protobuf's
+        # generated getters, descriptors and deprecated compatibility methods.
+        generated = {name: value for name, value in blocks.items() if ".pb.go:" in name}
+        summary["backend"] = percentage(
+            {name: value for name, value in blocks.items() if name not in generated}
+        )
+        if generated:
+            summary["generated_protobuf"] = percentage(generated)
         summary["business"] = percentage(
             {name: value for name, value in blocks.items() if "/internal/config/" in name}
         )

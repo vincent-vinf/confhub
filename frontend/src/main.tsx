@@ -44,6 +44,7 @@ const AuditsPage = lazy(() =>
 const UsersPage = lazy(() =>
   import('./pages/users').then((module) => ({ default: module.UsersPage })),
 )
+const SyncPage = lazy(() => import('./pages/sync').then((module) => ({ default: module.SyncPage })))
 const SettingsPage = lazy(() =>
   import('./pages/settings').then((module) => ({ default: module.SettingsPage })),
 )
@@ -146,6 +147,14 @@ const router = createBrowserRouter([
         element: (
           <Suspense fallback={<Loading />}>
             <AuditsPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: '/sync',
+        element: (
+          <Suspense fallback={<Loading />}>
+            <SyncPage />
           </Suspense>
         ),
       },

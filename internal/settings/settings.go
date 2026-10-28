@@ -4,20 +4,24 @@ package settings
 import (
 	"flag"
 	"fmt"
+	"github.com/vincent-vinf/confhub/internal/replication/transport"
 	"io"
+	"net/url"
 	"os"
 	"strconv"
 	"time"
 )
 
 type Settings struct {
-	Listen, Database, DSN, AdminPassword, JWTSecret, StaticDir                   string
-	PollInterval, SyncFailureTimeout, JWTExpiry, CleanupInterval, EventRetention time.Duration
-	CacheBytes                                                                   int64
-	HistoryLimit                                                                 int
-	CookieSecure                                                                 bool
-	Migrate                                                                      bool
-	ReadOnly                                                                     bool
+	Listen, Database, DSN, AdminPassword, JWTSecret, StaticDir                       string
+	PollInterval, SyncFailureTimeout, JWTExpiry, CleanupInterval, EventRetention     time.Duration
+	CacheBytes                                                                       int64
+	HistoryLimit                                                                     int
+	CookieSecure                                                                     bool
+	Migrate                                                                          bool
+	Role, ReplicationTransport, ReplicationURL, ReplicationToken, ReplicationSubject string
+	ReplicationLease                                                                 time.Duration
+	ReadOnly                                                                         bool
 }
 
 func Parse(args []string, getenv func(string) string) (Settings, error) {
@@ -38,6 +42,11 @@ func Parse(args []string, getenv func(string) string) (Settings, error) {
 	f.StringVar(&s.StaticDir, "static-dir", env("STATIC_DIR", "/app/frontend"), "React build directory")
 	readOnly, readOnlyErr := strconv.ParseBool(env("READ_ONLY", "false"))
 	f.BoolVar(&s.ReadOnly, "read-only", readOnly, "serve existing data without database writes")
+	f.StringVar(&s.Role, "role", env("ROLE", "standalone"), "standalone, cloud or edge")
+	f.StringVar(&s.ReplicationTransport, "replication-transport", env("REPLICATION_TRANSPORT", "websocket"), "websocket or nats")
+	f.StringVar(&s.ReplicationURL, "replication-url", env("REPLICATION_URL", ""), "cloud WebSocket endpoint or NATS broker URL")
+	f.StringVar(&s.ReplicationToken, "replication-token", env("REPLICATION_TOKEN", ""), "dedicated cloud-edge token (at least 32 bytes)")
+	f.StringVar(&s.ReplicationSubject, "replication-subject", env("REPLICATION_SUBJECT", "confhub.replication"), "NATS replication subject prefix")
 	// Register string defaults so invalid environment values are rejected rather
 	// than silently replaced by defaults.
 	values := map[string]*string{}
@@ -45,6 +54,7 @@ func Parse(args []string, getenv func(string) string) (Settings, error) {
 		{"poll-interval", "POLL_INTERVAL", "100ms"}, {"sync-failure-timeout", "SYNC_FAILURE_TIMEOUT", "2s"},
 		{"jwt-expiry", "JWT_EXPIRY", "2h"}, {"cleanup-interval", "CLEANUP_INTERVAL", "1m"}, {"event-retention", "EVENT_RETENTION", "24h"},
 		{"cache-bytes", "CACHE_BYTES", "67108864"}, {"history-limit", "HISTORY_LIMIT", "100"}, {"cookie-secure", "COOKIE_SECURE", "false"},
+		{"replication-lease", "REPLICATION_LEASE", "30s"},
 	} {
 		p := new(string)
 		f.StringVar(p, v.name, env(v.key, v.def), v.key)
@@ -72,7 +82,7 @@ func Parse(args []string, getenv func(string) string) (Settings, error) {
 	if f.NArg() != 0 {
 		return s, fmt.Errorf("unexpected argument %q", f.Arg(0))
 	}
-	for name, p := range map[string]*time.Duration{"poll-interval": &s.PollInterval, "sync-failure-timeout": &s.SyncFailureTimeout, "jwt-expiry": &s.JWTExpiry, "cleanup-interval": &s.CleanupInterval, "event-retention": &s.EventRetention} {
+	for name, p := range map[string]*time.Duration{"poll-interval": &s.PollInterval, "sync-failure-timeout": &s.SyncFailureTimeout, "jwt-expiry": &s.JWTExpiry, "cleanup-interval": &s.CleanupInterval, "event-retention": &s.EventRetention, "replication-lease": &s.ReplicationLease} {
 		v, err := time.ParseDuration(*values[name])
 		if err != nil || v <= 0 {
 			return s, fmt.Errorf("%s must be a positive duration", name)
@@ -106,6 +116,35 @@ func Parse(args []string, getenv func(string) string) (Settings, error) {
 	}
 	if !s.Migrate && len(s.JWTSecret) < 32 {
 		return s, fmt.Errorf("jwt-secret must contain at least 32 bytes")
+	}
+	if s.Role != "standalone" && s.Role != "cloud" && s.Role != "edge" {
+		return s, fmt.Errorf("role must be standalone, cloud or edge")
+	}
+	if s.ReadOnly && s.Role != "standalone" {
+		return s, fmt.Errorf("read-only requires standalone role; edge already rejects management writes and must persist replication data")
+	}
+	if s.ReplicationTransport != "websocket" && s.ReplicationTransport != "nats" {
+		return s, fmt.Errorf("replication-transport must be websocket or nats")
+	}
+	if s.ReplicationLease < 3*time.Second {
+		return s, fmt.Errorf("replication-lease must be at least 3s")
+	}
+	if !s.Migrate && s.Role != "standalone" {
+		if len(s.ReplicationToken) < 32 {
+			return s, fmt.Errorf("replication-token must contain at least 32 bytes")
+		}
+		if s.Role == "edge" || s.ReplicationTransport == "nats" {
+			u, err := url.Parse(s.ReplicationURL)
+			if err != nil || u.Host == "" || u.Fragment != "" || u.RawQuery != "" {
+				return s, fmt.Errorf("invalid replication-url")
+			}
+			if s.ReplicationTransport == "websocket" && (u.Scheme != "ws" && u.Scheme != "wss" || u.User != nil) {
+				return s, fmt.Errorf("websocket replication-url must use ws or wss without user info")
+			}
+			if s.ReplicationTransport == "nats" && (u.Scheme != "nats" && u.Scheme != "tls" || !transport.ValidSubject(s.ReplicationSubject)) {
+				return s, fmt.Errorf("invalid NATS replication URL or subject")
+			}
+		}
 	}
 	return s, nil
 }

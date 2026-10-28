@@ -30,7 +30,8 @@ npm --prefix frontend exec playwright install chromium
 | `make test-fuzz` | IP 单点包含性质、名称/正文/标签健壮性，各 5 秒、2 个 worker |
 | `npm --prefix frontend run test:coverage` | 前端逻辑单测及 V8 覆盖率 |
 | `make test-system` | 对提供的运行中实例执行 Go 系统测试程序 |
-| `make test-full` | 临时 PostgreSQL、三个真实服务、所有层及覆盖率门槛 |
+| `make test-full` | 临时 PostgreSQL/NATS、三个真实服务、所有层及覆盖率门槛 |
+| `make test-cloud-edge` | 云边两套隔离 Compose，分别验证 WebSocket/NATS、断云恢复及多实例接管 |
 
 服务端单元测试只包括无需数据库的边界；现有同步测试包含真实数据库场景，仍在集成层执行。`make sdk-unit` 的 Go 部分使用 `-short` 排除真实服务集成，Python 使用 `test_client.py`；完整 SDK 集成由隔离环境传入实际地址后运行。
 
@@ -42,9 +43,11 @@ python3 tests/run.py --coverage-gates
 python3 tests/run.py --report-dir test-results/acceptance --coverage-gates
 ```
 
-运行器创建随机名称和宿主端口的 PostgreSQL 容器，不挂载持久化部署目录。先初始化 schema，再并行启动三个带 race 和 coverage 的 Go 服务进程。各实例通过运行器拥有的独立 TCP 数据库代理连接同一数据库，以支持单节点隔离和数据库故障注入。测试数据使用唯一 namespace，正常及失败退出清理本次数据；脚本最后关闭进程/代理并删除测试容器。
+运行器创建随机名称和宿主端口的 PostgreSQL 与 NATS 容器，不挂载持久化部署目录。先初始化 schema，再并行启动三个带 race 和 coverage 的 Go 服务进程。各实例通过运行器拥有的独立 TCP 数据库代理连接同一数据库，以支持单节点隔离和数据库故障注入。测试数据使用唯一 namespace，正常及失败退出清理本次数据；脚本最后关闭进程/代理并删除测试容器。
 
 这套环境验证真实进程和数据库链路，服务进程也受 race 检查。数据库实例、代理和故障控制器均为本次运行所有，不操作现有 Compose 服务。
+
+同步模块的真实 PostgreSQL/NATS 测试随集成层执行。完整云边部署和故障注入使用独立入口 `make test-cloud-edge`，范围与结果见 [云边测试记录](cloud-edge-testing.md)。
 
 默认执行 `unit,integration,system,frontend` 四层，系统套件执行 `business,protocol,concurrency,random,presence,users,audit,batch,faults`。默认并发为 32 写入者、100 订阅客户端、10 配置、10 轮，随机种子为 20261010。这是正确性回归，不是容量压测。
 
@@ -114,6 +117,8 @@ go -C tests/system run -race . \
 故障检测与传播有明确窗口。测试先确认退出就绪再检查离线缓存；在线列表等待快照/租约，不套用配置通知延迟。日志过期由隔离控制器确认数据库中的变更日志实际清理完成，然后恢复节点。慢连接测试缩小 TCP 接收缓冲并停止读取，正常 SDK 继续收到配置，检查慢连接在心跳超时之前被关闭。
 
 ## 覆盖率与报告
+
+覆盖率报告保留所有原始数据。Protobuf 编译器生成的 `.pb.go` 单列为 `generated_protobuf`，手写后端代码继续执行 80% 门槛，业务规则和 SDK 门槛不变。
 
 Go 使用语句覆盖率，Python 使用语句/行覆盖率。Go 的 `backend-merged.out` 合并数据库/协议测试与真实运行服务生成的 coverage 数据，同一源码块取最大命中数，保留所有未命中块，不将百分比平均。后端分母包含 `cmd/main` 和有可执行语句的生产 `internal` 包，不统计测试辅助包、测试代码或第三方依赖。
 

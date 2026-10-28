@@ -94,6 +94,7 @@ export type User = UserInput & {
   id: string
   username: string
   revision: number
+  role?: 'edge'
   read_only?: boolean
 }
 
@@ -121,4 +122,21 @@ export type AuditFilter = {
   result: string
   from: string
   to: string
+}
+
+export type EdgeStatus = {
+  mirror: {
+    source: string
+    sequence: number
+    ready: boolean
+    last_success?: string
+    sync_owner?: string
+    lease_expires?: string
+  }
+  connection: {
+    active_sync_worker: boolean
+    connected: boolean
+    observed_cloud_cursor: { source: string; sequence: number }
+    error?: string
+  }
 }

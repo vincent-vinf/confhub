@@ -36,7 +36,9 @@ export function ConfigDetailPage() {
 }
 function Detail({ configKey }: { configKey: ConfigKey }) {
   const writable = usePermission('config.write', configKey.namespace, configKey.group)
-  const readOnly = !!useAuth().user?.read_only
+  const { user } = useAuth()
+  const readOnly = !!user?.read_only
+  const edge = user?.role === 'edge'
   const query = useQuery({
     queryKey: configQueryKey(configKey),
     queryFn: ({ signal }) => api.state(configKey, signal),
@@ -189,7 +191,7 @@ function Detail({ configKey }: { configKey: ConfigKey }) {
       <div className="tabs" role="tablist" aria-label="配置管理区域">
         {[
           { id: 'content', label: '配置内容', icon: FileCode2 },
-          { id: 'history', label: '版本历史', icon: History },
+          { id: 'history', label: edge ? '本地版本' : '版本历史', icon: History },
           { id: 'rules', label: '灰度规则', icon: GitBranch },
         ].map((item) => (
           <button
@@ -325,13 +327,11 @@ function Detail({ configKey }: { configKey: ConfigKey }) {
             </span>
           </div>
           <div className="editor-description">
-            <label htmlFor="version-description">
-              版本说明 <span>选填</span>
-            </label>
+            <label htmlFor="version-description">版本说明 {writable && <span>选填</span>}</label>
             <input
               id="version-description"
               readOnly={!writable}
-              placeholder="简要说明这次内容变更…"
+              placeholder={writable ? '简要说明这次内容变更…' : '未填写说明'}
               value={writable ? draft.description : (target?.description ?? '')}
               onChange={(e) => setDraft({ ...draft, description: e.target.value })}
             />

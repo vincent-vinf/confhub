@@ -2,6 +2,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -11,47 +12,81 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/vincent-vinf/confhub/internal/config"
+	"github.com/vincent-vinf/confhub/internal/replication"
 	"github.com/vincent-vinf/confhub/internal/storage"
 	"github.com/vincent-vinf/confhub/internal/syncer"
 )
 
 type Options struct {
-	JWTSecret    string
-	JWTExpiry    time.Duration
-	CookieSecure bool
-	StaticDir    string
-	ReadOnly     bool
+	JWTSecret            string
+	JWTExpiry            time.Duration
+	CookieSecure         bool
+	StaticDir            string
+	Edge                 bool
+	ReplicationToken     string
+	Context              context.Context
+	ReplicationWorker    *replication.Worker
+	ReplicationPublisher *replication.Publisher
+	ReadOnly             bool
 }
 type Server struct {
-	hub     *syncer.Hub
-	store   *storage.Store
-	options Options
-	router  *gin.Engine
+	hub              *syncer.Hub
+	store            *storage.Store
+	options          Options
+	router           *gin.Engine
+	replicationSlots chan struct{}
 }
 
 func New(store *storage.Store, hub *syncer.Hub, options Options) (*Server, error) {
+	if options.ReadOnly && (options.Edge || options.ReplicationToken != "" || options.ReplicationPublisher != nil || options.ReplicationWorker != nil) {
+		return nil, errors.New("read-only mode cannot run cloud-edge replication")
+	}
 	if len(options.JWTSecret) < 32 || options.JWTExpiry <= 0 {
 		return nil, errors.New("JWT secret must contain at least 32 bytes and expiry must be positive")
+	}
+	if options.Edge {
+		store.DisableManagementWrites()
 	}
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.SetTrustedProxies(nil)
-	s := &Server{store: store, hub: hub, options: options, router: r}
+	s := &Server{store: store, hub: hub, options: options, router: r, replicationSlots: make(chan struct{}, 128)}
 	if options.ReadOnly {
 		store.DisableWrites()
 	}
 	r.Use(s.readOnly, s.audit, gin.Recovery())
+	if options.Edge {
+		r.Use(func(c *gin.Context) {
+			if !edgeReadRequest(c) {
+				s.respond(c, nil, storage.ErrReadOnly)
+				return
+			}
+			c.Next()
+		})
+	}
 	r.Use(func(c *gin.Context) { c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 8<<20); c.Next() })
 	r.POST("/api/admin/login", s.sameOrigin, s.login)
 	a := r.Group("/api/admin", s.authenticate, s.sameOrigin, s.authorize)
 	a.POST("/logout", s.logout)
-	a.POST("/password", s.password)
-	a.GET("/namespaces", s.namespaces)
-	s.userRoutes(a)
-	s.configRoutes(a)
-	a.GET("/audits", s.audits)
+	a.GET("/me", s.me)
 	a.GET("/clients", s.clients)
 	a.GET("/client-tags", s.clientTags)
+	if options.Edge {
+		s.edgeRoutes(a)
+		r.GET("/api/edge/status", s.edgeStatus)
+	} else {
+		a.POST("/password", s.password)
+		a.GET("/namespaces", s.namespaces)
+		s.userRoutes(a)
+		s.configRoutes(a)
+		a.GET("/audits", s.audits)
+	}
+	if !options.Edge && options.ReplicationToken != "" {
+		if len(options.ReplicationToken) < 32 {
+			return nil, errors.New("replication token must contain at least 32 bytes")
+		}
+		r.GET("/api/replication/watch", s.replicate)
+	}
 	r.GET("/api/client/config", s.clientGet)
 	r.GET("/api/client/watch", s.watch)
 	r.GET("/health/live", func(c *gin.Context) { c.Status(200) })
@@ -83,15 +118,15 @@ func (s *Server) respond(c *gin.Context, value any, err error) {
 	case errors.Is(err, config.ErrInvalid), errors.Is(err, config.ErrNotEmpty):
 		status = 400
 		message = err.Error()
-	case errors.Is(err, syncer.ErrUnavailable):
+	case errors.Is(err, syncer.ErrUnavailable), errors.Is(err, replication.ErrUninitialized):
 		status = 503
+		message = err.Error()
+	case errors.Is(err, storage.ErrReadOnly):
+		status = 403
 		message = err.Error()
 	case errors.Is(err, storage.ErrForbidden):
 		status = 403
 		message = "permission denied"
-	case errors.Is(err, storage.ErrReadOnly):
-		status = 403
-		message = err.Error()
 	case errors.Is(err, storage.ErrUnauthorized):
 		status = 401
 		message = "invalid credentials"

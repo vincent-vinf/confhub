@@ -65,3 +65,12 @@ it('实例只读优先于管理员和写授权，读取仍受原有范围约束'
     expect(allows(admin, action, 'dev', 'apps')).toBe(false)
   }
 })
+
+it('边缘管理员可读取配置和客户端，不能写入或管理用户及组织', () => {
+  const edge = { ...user, system_admin: true, read_only: true, role: 'edge' as const }
+  expect(allows(edge, 'config.read', 'prod', 'apps')).toBe(true)
+  expect(allows(edge, 'clients.read')).toBe(true)
+  for (const action of ['config.write', 'organization.manage', 'users.manage', 'audit.read']) {
+    expect(allows(edge, action, 'prod', 'apps')).toBe(false)
+  }
+})

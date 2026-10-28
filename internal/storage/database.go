@@ -26,13 +26,14 @@ import (
 //go:embed migrations/*/*.sql
 var migrations embed.FS
 
-const SchemaVersion = 6
+const SchemaVersion = 9
 
 type Store struct {
-	db       *gorm.DB
-	pool     *sql.DB
-	dialect  string
-	readOnly atomic.Bool
+	db                 *gorm.DB
+	pool               *sql.DB
+	dialect            string
+	readOnly           atomic.Bool
+	managementReadOnly atomic.Bool
 }
 
 var ErrReadOnly = errors.New("instance is read-only")
@@ -40,7 +41,18 @@ var ErrReadOnly = errors.New("instance is read-only")
 // DisableWrites also protects callers outside the HTTP management boundary.
 func (s *Store) DisableWrites() { s.readOnly.Store(true) }
 
+// Edge replicas reject managed changes but still persist replication, presence
+// and local audit data. Database replicas use DisableWrites instead.
+func (s *Store) DisableManagementWrites() { s.managementReadOnly.Store(true) }
+
 func (s *Store) writable() error {
+	if s.managementReadOnly.Load() {
+		return ErrReadOnly
+	}
+	return s.localWritable()
+}
+
+func (s *Store) localWritable() error {
 	if s.readOnly.Load() {
 		return ErrReadOnly
 	}
@@ -110,6 +122,7 @@ func Open(ctx context.Context, dialect, dsn string) (*Store, error) {
 	}
 	return &Store{db: orm, pool: db, dialect: dialect}, nil
 }
+
 func driverName(dialect string) (string, error) {
 	switch dialect {
 	case "postgres":

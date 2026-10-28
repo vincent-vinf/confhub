@@ -115,6 +115,12 @@ func (s *Store) beginMutation(ctx context.Context) (*gorm.DB, int64, error) {
 	if err := s.writable(); err != nil {
 		return nil, 0, err
 	}
+	return s.beginStreamMutation(ctx)
+}
+func (s *Store) beginStreamMutation(ctx context.Context) (*gorm.DB, int64, error) {
+	if err := s.localWritable(); err != nil {
+		return nil, 0, err
+	}
 	tx := s.db.WithContext(ctx).Begin(&sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if tx.Error != nil {
 		return nil, 0, tx.Error

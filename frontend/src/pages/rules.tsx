@@ -310,9 +310,9 @@ export function RulesPanel({
               </div>
             </div>
             <div className="button-row">
-              <Button hidden={!writable} onClick={onEditBeta}>
+              <Button onClick={onEditBeta}>
                 <Pencil size={15} aria-hidden="true" />
-                编辑配置
+                {writable ? '编辑配置' : '查看配置'}
               </Button>
               <Button hidden={!writable} onClick={promote}>
                 转为全量

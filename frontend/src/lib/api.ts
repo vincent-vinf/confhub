@@ -1,4 +1,5 @@
 import type {
+  EdgeStatus,
   AuditFilter,
   AuditPage,
   User,
@@ -92,6 +93,7 @@ export const listUrl = (namespace = 'public', group = 'DEFAULT_GROUP') =>
 export const configQueryKey = (key: ConfigKey) =>
   ['config', key.namespace, key.group, key.name] as const
 export const api = {
+  edgeStatus: (signal?: AbortSignal) => request<EdgeStatus>(`${base}/edge/status`, { signal }),
   audits: (filter: AuditFilter, before = '', signal?: AbortSignal) =>
     request<AuditPage>(
       `${base}/audits?${new URLSearchParams({ ...filter, before, limit: '25' })}`,

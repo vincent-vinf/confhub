@@ -15,6 +15,7 @@ x-app: &app
   environment:
     GOMEMLIMIT: ${CONFHUB_APP_GO_MEMORY:-768MiB}
     CONFHUB_READ_ONLY: "true"
+    CONFHUB_ROLE: standalone
     CONFHUB_DATABASE: ${CONFHUB_DATABASE:-postgres}
     CONFHUB_DSN: ${CONFHUB_DSN:?set CONFHUB_DSN to the replicated database}
     CONFHUB_JWT_SECRET: ${CONFHUB_JWT_SECRET:?set CONFHUB_JWT_SECRET}

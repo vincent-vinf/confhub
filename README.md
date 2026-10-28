@@ -2,7 +2,7 @@
 
 轻量配置中心，使用 Go/Gin、React、HTTP GET 与 WebSocket。支持不可变主版本、配置级唯一可覆盖的灰度 beta、全量回退、乐观锁、多用户 JWT 登录和 namespace/group 读写授权，以及 PostgreSQL/MySQL 存储。支持 IP 区间灰度、在线客户端只读查看、标签补全和操作审计。
 
-需求与架构见 [docs/requirements.md](docs/requirements.md) 和 [docs/architecture.md](docs/architecture.md)，接口见 [docs/backend-api.md](docs/backend-api.md)，控制台交互和验证见 [docs/frontend-implementation.md](docs/frontend-implementation.md)。[Go/Python SDK](docs/sdk.md) 支持获取、订阅、自动重连和可选离线缓存。资源限制压测方案与实测范围见 [压测指南](docs/load-testing.md)。
+需求与架构见 [docs/requirements.md](docs/requirements.md) 和 [docs/architecture.md](docs/architecture.md)，接口见 [docs/backend-api.md](docs/backend-api.md)，控制台交互和验证见 [docs/frontend-implementation.md](docs/frontend-implementation.md)。[Go/Python SDK](docs/sdk.md) 支持获取、订阅、自动重连和可选离线缓存。资源限制压测方案与实测范围见 [压测指南](docs/load-testing.md)。[云边部署](docs/cloud-edge.md)支持云端权威、本地数据库镜像和断云继续服务，同步通信可选择 WebSocket 或 NATS。
 
 ## 启动
 
@@ -16,7 +16,7 @@ make frontend-install frontend-build build
 ./bin/confhub --static-dir frontend/dist
 ```
 
-当前 schema 6。已有 schema 4/5 可保留 admin 密码及配置数据升级：停止旧实例，使用新二进制执行下方迁移命令，再启动新实例；从 schema 4 升级需重新登录。schema 1/2/3 仍不兼容，需按此前策略使用空数据库重建，不能通过 Force 修改标记绕过。
+当前 schema 9。已有 schema 4/5/6/7/8 可保留 admin 密码及配置数据升级：停止旧实例，使用新二进制执行下方迁移命令，再启动新实例；从 schema 4 升级需重新登录。schema 1/2/3 仍不兼容，需按此前策略使用空数据库重建，不能通过 Force 修改标记绕过。
 
 管理员通过“用户管理”创建账号并授予只读或读写权限，支持整个命名空间或指定分组。在线客户端查看单独授权。权限覆盖控制台和管理 API，SDK 的 HTTP GET/WebSocket 仍无需鉴权。详见 [多用户与权限](docs/users-permissions.md)。系统管理员可在“操作审计”查看管理操作并按用户、IP、操作、结果及时间筛选，见 [审计说明](docs/audit.md)。
 
@@ -31,6 +31,8 @@ make frontend-install frontend-build build
 ## 参数
 
 只读部署可使用 `--read-only` 或 `CONFHUB_READ_ONLY=true`，连接外部复制的数据库副本，保留读取、订阅和只读控制台。部署及同步要求见 [只读运行模式](docs/read-only.md)。
+
+`--read-only` 仅用于 `standalone`。云边部署中的 `edge` 已限制管理写入，同时保留本地复制、在线连接和审计写入，无需也不能再叠加该参数。
 
 flag 优先于同名环境变量。不读取启动配置文件。轮询间隔至少 1ms，同步失败时限至少 2ms；轮询间隔不能超过失败时限的一半，以保证故障检测时限。
 
@@ -96,6 +98,7 @@ CONFHUB_DEV_BACKEND=http://127.0.0.1:8081 npm --prefix frontend run dev
 ```sh
 # 需先安装 sdk/python[dev]、frontend 依赖及 Chromium：
 make test-unit       # 业务规则、启动参数及两种 SDK 单元测试
+make test-cloud-edge # 独立云/边两套 Compose；WebSocket/NATS、SDK 和故障恢复
 make test-full       # 隔离环境中的完整回归，含覆盖率门槛
 make test-fuzz       # 两组各 5 秒的 fuzz
 ```

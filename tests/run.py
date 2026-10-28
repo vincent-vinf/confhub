@@ -20,6 +20,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 IMAGE = "registry.cn-hangzhou.aliyuncs.com/bodesi/postgres:17"
+NATS_IMAGE = "registry.cn-hangzhou.aliyuncs.com/bodesi/nats:2.12.15-alpine-curl"
 
 
 def free_port():
@@ -116,6 +117,7 @@ class Environment:
         self.proxies = []
         self.ports = []
         self.database_created = False
+        self.broker_created = False
         self.controller = None
         self.lock = threading.Lock()
         self.paused = False
@@ -135,7 +137,11 @@ class Environment:
             stdout=self.logs[index],
             stderr=self.logs[index],
         )
-        wait_for(lambda: self.processes[index].poll() is not None or ready(self.addresses[index]))
+        wait_for(
+            lambda: (
+                self.processes[index].poll() is not None or ready(self.addresses[index])
+            )
+        )
         if self.processes[index].poll() is not None:
             raise RuntimeError(f"application {index} exited; inspect owned app log")
 
@@ -176,14 +182,25 @@ class Environment:
         )
         self.database_created = True
         self.port = int(
-            subprocess.check_output(["docker", "port", self.name, "5432/tcp"], text=True)
+            subprocess.check_output(
+                ["docker", "port", self.name, "5432/tcp"], text=True
+            )
             .strip()
             .rsplit(":", 1)[1]
         )
         wait_for(
             lambda: (
                 subprocess.run(
-                    ["docker", "exec", self.name, "pg_isready", "-U", "confhub", "-d", "confhub"],
+                    [
+                        "docker",
+                        "exec",
+                        self.name,
+                        "pg_isready",
+                        "-U",
+                        "confhub",
+                        "-d",
+                        "confhub",
+                    ],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 ).returncode
@@ -192,6 +209,35 @@ class Environment:
         )
         self.env["CONFHUB_TEST_POSTGRES_DSN"] = self.dsn(self.port)
         self.env["CONFHUB_DSN"] = self.dsn(self.port)
+        subprocess.run(
+            [
+                "docker",
+                "run",
+                "-d",
+                "--name",
+                self.name + "-nats",
+                "--cpus",
+                "0.5",
+                "--memory",
+                "256m",
+                "--memory-swap",
+                "256m",
+                "-p",
+                "127.0.0.1::4222",
+                NATS_IMAGE,
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+        )
+        self.broker_created = True
+        broker_port = int(
+            subprocess.check_output(
+                ["docker", "port", self.name + "-nats", "4222/tcp"], text=True
+            )
+            .strip()
+            .rsplit(":", 1)[1]
+        )
+        self.env["CONFHUB_TEST_NATS_URL"] = f"nats://127.0.0.1:{broker_port}"
         subprocess.run(
             ["go", "build", "-race", "-cover", "-o", str(self.binary), "./cmd/main"],
             cwd=ROOT,
@@ -275,7 +321,9 @@ class Environment:
                             for proxy in environment.proxies:
                                 proxy.enable(True)
                         elif action == "wait-retention":
-                            time.sleep(2.1)  # let the owned database's retention clock expire
+                            time.sleep(
+                                2.1
+                            )  # let the owned database's retention clock expire
 
                             def purged():
                                 value = subprocess.check_output(
@@ -305,7 +353,9 @@ class Environment:
 
         self.controller = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Controller)
         threading.Thread(target=self.controller.serve_forever, daemon=True).start()
-        self.env["CONFHUB_SYSTEM_CONTROL"] = f"http://127.0.0.1:{self.controller.server_port}"
+        self.env["CONFHUB_SYSTEM_CONTROL"] = (
+            f"http://127.0.0.1:{self.controller.server_port}"
+        )
         self.env["CONFHUB_SYSTEM_CONTROL_TOKEN"] = token
         self.env["CONFHUB_SYSTEM_PASSWORD"] = self.env["CONFHUB_ADMIN_PASSWORD"]
         self.env["CONFHUB_SDK_TEST_PASSWORD"] = self.env["CONFHUB_ADMIN_PASSWORD"]
@@ -336,7 +386,15 @@ class Environment:
         for log in self.logs:
             log.close()
         if self.database_created:
-            subprocess.run(["docker", "rm", "-f", self.name], check=True, stdout=subprocess.DEVNULL)
+            subprocess.run(
+                ["docker", "rm", "-f", self.name], check=True, stdout=subprocess.DEVNULL
+            )
+        if self.broker_created:
+            subprocess.run(
+                ["docker", "rm", "-f", self.name + "-nats"],
+                check=True,
+                stdout=subprocess.DEVNULL,
+            )
 
 
 def main():
@@ -368,7 +426,10 @@ def main():
         layer not in {"unit", "integration", "system", "frontend"} for layer in layers
     ):
         parser.error("unknown layer")
-    if min(args.writers, args.clients, args.configs, args.rounds) < 1 or args.writers < 2:
+    if (
+        min(args.writers, args.clients, args.configs, args.rounds) < 1
+        or args.writers < 2
+    ):
         parser.error("invalid test sizes")
     if (
         any(layer in {"unit", "integration", "system"} for layer in layers)
@@ -379,7 +440,11 @@ def main():
         parser.error("coverage gates require integration and system layers")
     report = Path(args.report_dir).resolve()
     report.mkdir(parents=True, exist_ok=True)
-    env = {key: value for key, value in os.environ.items() if not key.startswith("CONFHUB_")}
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("CONFHUB_")
+    }
     env.update(
         {
             "CGO_ENABLED": "1",
@@ -422,10 +487,16 @@ def main():
             failures=str(sum(item["exit_code"] != 0 for item in results)),
         )
         for item in results:
-            case = ET.SubElement(suite, "testcase", name=item["name"], time=str(item["seconds"]))
+            case = ET.SubElement(
+                suite, "testcase", name=item["name"], time=str(item["seconds"])
+            )
             if item["exit_code"]:
-                ET.SubElement(case, "failure", message="inspect corresponding owned layer log")
-        ET.ElementTree(suite).write(report / "layers.xml", encoding="utf-8", xml_declaration=True)
+                ET.SubElement(
+                    case, "failure", message="inspect corresponding owned layer log"
+                )
+        ET.ElementTree(suite).write(
+            report / "layers.xml", encoding="utf-8", xml_declaration=True
+        )
         print("PASS" if process.returncode == 0 else "FAIL", name, flush=True)
         if process.returncode:
             raise RuntimeError(f"{name} failed; inspect {report / (name + '.log')}")
@@ -442,9 +513,14 @@ def main():
                     "-coverprofile=" + str(report / "unit.out"),
                     "./internal/config",
                     "./internal/settings",
+                    "./internal/replication/...",
                 ],
             )
-            execute("sdk-unit", ["go", "test", "-race", "-count=1", "./..."], ROOT / "sdk/go")
+            execute(
+                "sdk-unit",
+                ["go", "test", "-race", "-count=1", "./..."],
+                ROOT / "sdk/go",
+            )
             execute(
                 "python-unit",
                 [
@@ -477,6 +553,7 @@ def main():
                         "./internal/storage",
                         "./internal/server",
                         "./internal/syncer",
+                        "./internal/replication/...",
                     ],
                 )
                 execute("vet", ["go", "vet", "./cmd/...", "./internal/..."])
@@ -560,9 +637,12 @@ def main():
                 connected_env = {
                     key: value
                     for key, value in env.items()
-                    if key not in {"CONFHUB_SYSTEM_CONTROL", "CONFHUB_SYSTEM_CONTROL_TOKEN"}
+                    if key
+                    not in {"CONFHUB_SYSTEM_CONTROL", "CONFHUB_SYSTEM_CONTROL_TOKEN"}
                 }
-                connected_env["CONFHUB_SYSTEM_ADDRESSES"] = ",".join(environment.addresses)
+                connected_env["CONFHUB_SYSTEM_ADDRESSES"] = ",".join(
+                    environment.addresses
+                )
                 execute(
                     "connected-system",
                     [
@@ -616,12 +696,18 @@ def main():
                     + (["--gate"] if args.coverage_gates else []),
                 )
             race_found = any(
-                "DATA RACE" in (report / f"app-{index}.log").read_text() for index in range(3)
+                "DATA RACE" in (report / f"app-{index}.log").read_text()
+                for index in range(3)
             )
             if race_found:
-                raise RuntimeError("application race detector found a data race; inspect app logs")
+                raise RuntimeError(
+                    "application race detector found a data race; inspect app logs"
+                )
         if "frontend" in layers:
-            execute("frontend-typecheck", ["npm", "--prefix", "frontend", "run", "typecheck"])
+            execute(
+                "frontend-typecheck",
+                ["npm", "--prefix", "frontend", "run", "typecheck"],
+            )
             execute(
                 "frontend-unit",
                 [
@@ -634,7 +720,10 @@ def main():
                     "--coverage.reportsDirectory=" + str(report / "frontend-coverage"),
                 ],
             )
-            execute("frontend-format", ["npm", "--prefix", "frontend", "run", "format:check"])
+            execute(
+                "frontend-format",
+                ["npm", "--prefix", "frontend", "run", "format:check"],
+            )
             execute("frontend-e2e", ["npm", "--prefix", "frontend", "run", "test:e2e"])
     finally:
         environment.close()

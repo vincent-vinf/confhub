@@ -15,7 +15,7 @@ func (s *Store) Cleanup(ctx context.Context, owner string, history int, retentio
 	if owner == "" || len(owner) > 36 || history < 1 || retention <= 0 || batch < 1 || batch > 1000 {
 		return false, fmt.Errorf("invalid cleanup parameters")
 	}
-	tx, _, err := s.beginMutation(ctx)
+	tx, _, err := s.beginStreamMutation(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -69,9 +69,12 @@ func (s *Store) Cleanup(ctx context.Context, owner string, history int, retentio
 		if err = tx.Where(clause.Lte{Column: "sequence", Value: through}).Delete(&eventRow{}).Error; err != nil {
 			return false, err
 		}
-		if err = tx.Model(&streamRow{}).Where(map[string]any{"id": 1}).Update("purged_through", through).Error; err != nil {
+		if err = tx.Model(&streamRow{}).Where("id = ? AND purged_through < ?", 1, through).Update("purged_through", through).Error; err != nil {
 			return false, err
 		}
+	}
+	if err := s.cleanupMirrors(tx, now, batch); err != nil {
+		return false, err
 	}
 	return true, tx.Commit().Error
 }

@@ -7,6 +7,11 @@ DOCKER_IMAGE ?= $(DOCKER_REGISTRY)/bodesi/confhub
 IMAGE_TAG ?= dev
 SDK_PYTHON ?= sdk/python/.venv/bin/python
 
+# Generated files are checked in; normal builds do not require protoc.
+# protoc 36.2 and protoc-gen-go v1.36.9 reproduce the current output.
+proto-generate:
+	protoc --go_out=. --go_opt=module=github.com/vincent-vinf/confhub internal/replication/wire/replication.proto
+
 go-mod-download:
 	go mod download
 
@@ -14,7 +19,7 @@ test: go-mod-download
 	go test $(SERVER_PACKAGES)
 
 test-unit:
-	go test -count=1 ./internal/config ./internal/settings
+	go test -count=1 ./internal/config ./internal/settings ./internal/replication/...
 	$(MAKE) sdk-unit
 
 sdk-unit:
@@ -29,6 +34,11 @@ test-full:
 test-system:
 	go -C tests/system run -race .
 
+# Two owned Compose projects, each with a local PostgreSQL and two app replicas.
+# Runs both WebSocket and NATS, including disconnection/restart and SDK failover.
+test-cloud-edge:
+	CONFHUB_RUN_CLOUD_EDGE=1 go -C tests/cloudedge test -race -v -count=1 -timeout=15m ./...
+
 # Separate performance sweep in an owned resource-limited Compose project.
 load-test:
 	python3 tests/load/run.py
@@ -39,7 +49,7 @@ test-fuzz:
 
 test-integration:
 	@test -n "$(CONFHUB_TEST_POSTGRES_DSN)" || (echo "CONFHUB_TEST_POSTGRES_DSN is required"; exit 1)
-	go test -count=1 ./cmd/... ./internal/storage ./internal/syncer ./internal/server
+	go test -count=1 ./cmd/... ./internal/storage ./internal/syncer ./internal/server ./internal/replication/...
 
 test-race:
 	@test -n "$(CONFHUB_TEST_POSTGRES_DSN)" || (echo "CONFHUB_TEST_POSTGRES_DSN is required"; exit 1)
@@ -95,4 +105,4 @@ docker-image-build-local:
 		--build-arg IMAGE_TAG=$(IMAGE_TAG) \
 		-t $(DOCKER_IMAGE):$(IMAGE_TAG) .
 
-.PHONY: go-mod-download test test-unit test-integration test-race vet build run clean docker-image-build-local frontend-install frontend-build frontend-test frontend-check frontend-e2e sdk-test sdk-check sdk-integration sdk-unit test-full test-system test-fuzz load-test
+.PHONY: proto-generate go-mod-download test test-unit test-integration test-race vet build run clean docker-image-build-local frontend-install frontend-build frontend-test frontend-check frontend-e2e sdk-test sdk-check sdk-integration sdk-unit test-full test-system test-cloud-edge test-fuzz load-test

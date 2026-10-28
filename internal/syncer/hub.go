@@ -65,6 +65,7 @@ func (h *Hub) Run(ctx context.Context) {
 	defer func() { stopWatch(); <-watchDone; h.offline() }()
 	cursor := int64(0)
 	initialized := false
+	var pending *refreshBatch
 	for {
 		timeout := h.options.FailureTimeout / 2
 		if timeout > time.Second {
@@ -80,25 +81,27 @@ func (h *Hub) Run(ctx context.Context) {
 				h.cache.clear()
 				cursor = changes.Sequence
 				initialized = true
-
-			} else if cursor < changes.PurgedThrough {
-				err = h.compensate(pollCtx)
-				if err == nil {
-					cursor = changes.Sequence
-				}
+				pending = nil
 			} else {
-				keys := map[config.Key]struct{}{}
-				for _, event := range changes.Events {
-					keys[event.Key] = struct{}{}
-				}
-				for k := range keys {
-					h.cache.invalidate(k)
-					if err = h.refresh(pollCtx, k); err != nil {
-						break
+				if cursor < changes.PurgedThrough && (pending == nil || changes.PurgedThrough > pending.purgedThrough) {
+					pending = h.compensation(changes)
+				} else if pending == nil && len(changes.Events) > 0 {
+					keys := map[config.Key]struct{}{}
+					for _, event := range changes.Events {
+						keys[event.Key] = struct{}{}
+					}
+					pending = &refreshBatch{sequence: changes.Events[len(changes.Events)-1].Sequence, purgedThrough: changes.PurgedThrough}
+					for k := range keys {
+						pending.keys = append(pending.keys, k)
 					}
 				}
-				if err == nil && len(changes.Events) > 0 {
-					cursor = changes.Events[len(changes.Events)-1].Sequence
+				if pending != nil {
+					err = h.refreshBatch(pollCtx, pending, timeout/2)
+					if err == nil && len(pending.keys) == 0 {
+						// Later events must be replayed even when reads already saw them.
+						cursor = pending.sequence
+						pending = nil
+					}
 				}
 			}
 		}
@@ -108,7 +111,7 @@ func (h *Hub) Run(ctx context.Context) {
 			h.lastSuccess = time.Now()
 			h.ready.Store(true)
 			h.mu.Unlock()
-			if len(changes.Events) == 256 && cursor < changes.Sequence {
+			if pending != nil || (len(changes.Events) == 256 && cursor < changes.Sequence) {
 				continue
 			}
 		}
@@ -134,17 +137,36 @@ func (h *Hub) offline() {
 	}
 	h.cache.clear()
 }
-func (h *Hub) compensate(ctx context.Context) error {
+
+// refreshBatch retains completed work across polls. A new purge restarts the
+// snapshot, while ordinary later events wait until its captured cursor is done.
+type refreshBatch struct {
+	keys                    []config.Key
+	sequence, purgedThrough int64
+}
+
+func (h *Hub) compensation(changes config.Changes) *refreshBatch {
 	h.cache.clear()
+	batch := &refreshBatch{sequence: changes.Sequence, purgedThrough: changes.PurgedThrough}
 	h.mu.Lock()
-	keys := make([]config.Key, 0, len(h.subscribers))
 	for k := range h.subscribers {
-		keys = append(keys, k)
+		batch.keys = append(batch.keys, k)
 	}
 	h.mu.Unlock()
-	for _, k := range keys {
+	return batch
+}
+
+func (h *Hub) refreshBatch(ctx context.Context, batch *refreshBatch, budget time.Duration) error {
+	until := time.Now().Add(budget)
+	for n := 0; len(batch.keys) > 0 && n < 32; n++ {
+		k := batch.keys[0]
+		h.cache.invalidate(k)
 		if err := h.refresh(ctx, k); err != nil {
 			return err
+		}
+		batch.keys = batch.keys[1:]
+		if time.Now().After(until) {
+			break
 		}
 	}
 	return nil

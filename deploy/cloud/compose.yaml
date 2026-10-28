@@ -1,0 +1,71 @@
+name: confhub-cloud
+x-app: &app
+  image: ${CONFHUB_IMAGE:-confhub:dev}
+  restart: unless-stopped
+  cpus: ${CONFHUB_APP_CPUS:-1.0}
+  mem_limit: ${CONFHUB_APP_MEMORY:-1g}
+  memswap_limit: ${CONFHUB_APP_MEMORY:-1g}
+  environment: &app-env
+    GOMEMLIMIT: 768MiB
+    CONFHUB_ROLE: cloud
+    CONFHUB_DATABASE: postgres
+    CONFHUB_DSN: postgres://confhub:${CONFHUB_DB_PASSWORD:?set CONFHUB_DB_PASSWORD}@db:5432/confhub?sslmode=disable
+    CONFHUB_ADMIN_PASSWORD: ${CONFHUB_ADMIN_PASSWORD:?set CONFHUB_ADMIN_PASSWORD}
+    CONFHUB_JWT_SECRET: ${CONFHUB_JWT_SECRET:?set CONFHUB_JWT_SECRET}
+    CONFHUB_REPLICATION_TOKEN: ${CONFHUB_REPLICATION_TOKEN:?set CONFHUB_REPLICATION_TOKEN}
+    CONFHUB_REPLICATION_TRANSPORT: ${CONFHUB_REPLICATION_TRANSPORT:-websocket}
+    CONFHUB_REPLICATION_URL: ${CONFHUB_CLOUD_REPLICATION_URL:-}
+    CONFHUB_REPLICATION_SUBJECT: ${CONFHUB_REPLICATION_SUBJECT:-confhub.replication}
+    CONFHUB_EVENT_RETENTION: ${CONFHUB_EVENT_RETENTION:-24h}
+    CONFHUB_CLEANUP_INTERVAL: ${CONFHUB_CLEANUP_INTERVAL:-1m}
+  depends_on:
+    db: {condition: service_healthy}
+  networks: [default, replication]
+  healthcheck:
+    test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8080/health/ready]
+    interval: 2s
+    timeout: 2s
+    retries: 30
+services:
+  db:
+    image: registry.cn-hangzhou.aliyuncs.com/bodesi/postgres:17
+    cpus: ${CONFHUB_DB_CPUS:-1.0}
+    mem_limit: ${CONFHUB_DB_MEMORY:-2g}
+    memswap_limit: ${CONFHUB_DB_MEMORY:-2g}
+    environment:
+      POSTGRES_DB: confhub
+      POSTGRES_USER: confhub
+      POSTGRES_PASSWORD: ${CONFHUB_DB_PASSWORD:?set CONFHUB_DB_PASSWORD}
+    volumes: [postgres:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U confhub -d confhub]
+      interval: 1s
+      timeout: 2s
+      retries: 60
+  app:
+    <<: *app
+    ports: ["127.0.0.1:${CONFHUB_CLOUD_PORT:-18080}:8080"]
+    networks:
+      default: {}
+      replication:
+        aliases: ["${CONFHUB_CLOUD_ALIAS:-confhub-cloud}"]
+  app2:
+    <<: *app
+    profiles: [ha]
+    ports: ["127.0.0.1:${CONFHUB_CLOUD_PORT2:-18081}:8080"]
+  nats:
+    image: registry.cn-hangzhou.aliyuncs.com/bodesi/nats:2.12.15-alpine-curl
+    profiles: [nats]
+    command: ["--user", confhub, "--pass", "${CONFHUB_NATS_PASSWORD:?set CONFHUB_NATS_PASSWORD}"]
+    cpus: 0.5
+    mem_limit: 256m
+    memswap_limit: 256m
+    networks:
+      replication:
+        aliases: ["${CONFHUB_NATS_ALIAS:-confhub-nats}"]
+volumes:
+  postgres: {}
+networks:
+  replication:
+    external: true
+    name: ${CONFHUB_REPLICATION_NETWORK:-confhub-cloud-edge}

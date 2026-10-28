@@ -20,13 +20,17 @@ func (s *Server) require(c *gin.Context, action, namespace, group string) bool {
 // Unknown management operations fail closed.
 func (s *Server) authorize(c *gin.Context) {
 	path := c.FullPath()
+	if s.options.Edge && (path == "/api/admin/users" || path == "/api/admin/audits" || path == "/api/admin/password") {
+		s.respond(c, nil, storage.ErrReadOnly)
+		return
+	}
 	switch path {
 	case "/api/admin/me", "/api/admin/logout", "/api/admin/password":
 		return
 	case "/api/admin/audits":
 		s.require(c, "audit.read", "", "")
 		return
-	case "/api/admin/clients", "/api/admin/client-tags":
+	case "/api/admin/clients", "/api/admin/client-tags", "/api/admin/edge/status":
 		s.require(c, "clients.read", "", "")
 		return
 	case "/api/admin/users", "/api/admin/users/:id", "/api/admin/users/:id/password":
@@ -79,12 +83,6 @@ func (s *Server) groups(c *gin.Context) {
 	s.respond(c, visible, err)
 }
 func (s *Server) userRoutes(a *gin.RouterGroup) {
-	a.GET("/me", func(c *gin.Context) {
-		c.JSON(200, struct {
-			storage.User
-			ReadOnly bool `json:"read_only,omitempty"`
-		}{currentUser(c), s.options.ReadOnly})
-	})
 	a.GET("/users", func(c *gin.Context) {
 		limit, err := integer(c, "limit", 25)
 		if err != nil {

@@ -1,6 +1,7 @@
 package storage_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/vincent-vinf/confhub/internal/config"
+	"github.com/vincent-vinf/confhub/internal/replication"
 	"github.com/vincent-vinf/confhub/internal/storage"
 	"github.com/vincent-vinf/confhub/internal/testutil"
 )
@@ -35,6 +37,66 @@ func TestMigrationIsIdempotentAndDoesNotCloseApplicationPool(t *testing.T) {
 	}
 	if err = s.InitializeAdmin(context.Background(), ""); err == nil {
 		t.Fatal("initialized admin without a password")
+	}
+}
+
+func TestSchemaSixReplicationUpgradePreservesAdminAndConfiguration(t *testing.T) {
+	dsn := testutil.Database(t)
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, file := range []string{"000001_initial.up.sql", "000002_mutable_beta.up.sql", "000003_client_presence.up.sql", "000004_shared_beta.up.sql", "000005_users.up.sql", "000006_audit.up.sql"} {
+		raw, err := os.ReadFile("migrations/postgres/" + file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(string(raw)); err != nil {
+			t.Fatal(file, err)
+		}
+	}
+	if _, err := db.Exec("CREATE TABLE schema_migrations (version BIGINT PRIMARY KEY, dirty BOOLEAN NOT NULL); INSERT INTO schema_migrations VALUES (6,FALSE)"); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	store, err := storage.Open(ctx, "postgres", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.InitializeAdmin(ctx, "preserved-password"); err != nil {
+		t.Fatal(err)
+	}
+	key := config.Key{Namespace: "public", Group: "DEFAULT_GROUP", Name: "preserved"}
+	saved, err := store.Save(ctx, key, config.Edit{Content: "keep", Format: "text"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.Migrate("postgres", dsn, true); err == nil {
+		t.Fatal("schema six was silently upgraded")
+	}
+	if err := storage.Migrate("postgres", dsn, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Authenticate(ctx, "admin", "preserved-password"); err != nil {
+		t.Fatal(err)
+	}
+	current, _, err := store.Current(ctx, key)
+	if err != nil || current.ID != saved.State.ID || current.Versions[1].Content != "keep" {
+		t.Fatal(current, err)
+	}
+	var data bytes.Buffer
+	batch, err := store.Export(ctx, replication.Cursor{}, &data)
+	if err != nil || !batch.Full || batch.Count != 1 {
+		t.Fatal(batch, err)
+	}
+	status, err := store.MirrorStatus(ctx)
+	if err != nil || status.Ready {
+		t.Fatal(status, err)
+	}
+	if err := storage.Migrate("postgres", dsn, true); err != nil {
+		t.Fatal(err)
 	}
 }
 func TestDirtySchemaIsNeverAutomaticallyForced(t *testing.T) {

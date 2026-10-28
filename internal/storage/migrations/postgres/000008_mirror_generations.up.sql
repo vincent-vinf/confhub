@@ -1,0 +1,3 @@
+ALTER TABLE replication_mirror ADD COLUMN active_generation VARCHAR(36) NOT NULL DEFAULT '';
+CREATE TABLE replication_generations (id VARCHAR(36) PRIMARY KEY, owner VARCHAR(36) NOT NULL, epoch BIGINT NOT NULL, staging BOOLEAN NOT NULL);
+CREATE TABLE replication_configs (generation VARCHAR(36) NOT NULL, namespace VARCHAR(128) NOT NULL, group_name VARCHAR(128) NOT NULL, name VARCHAR(128) NOT NULL, config_id VARCHAR(36) NOT NULL, state_json TEXT NOT NULL, PRIMARY KEY(generation,namespace,group_name,name), UNIQUE(generation,config_id), FOREIGN KEY(generation) REFERENCES replication_generations(id) ON DELETE CASCADE);

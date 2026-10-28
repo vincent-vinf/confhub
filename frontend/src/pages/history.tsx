@@ -24,7 +24,9 @@ export function HistoryPanel({
   onEditBeta: () => void
 }) {
   const writable = usePermission('config.write', configKey.namespace, configKey.group)
-  const readOnly = !!useAuth().user?.read_only
+  const { user } = useAuth()
+  const readOnly = !!user?.read_only
+  const edge = user?.role === 'edge'
   const versions = useQuery({
     queryKey: readOnly ? ['versions', configKey, state.global_version] : ['versions', configKey],
     queryFn: ({ signal }) => allVersions(configKey, signal),
@@ -63,7 +65,7 @@ export function HistoryPanel({
           <div>
             <div className="panel-title">
               <History size={18} aria-hidden="true" />
-              版本历史 <Badge>{versions.data?.length ?? '…'}</Badge>
+              {edge ? '本地版本' : '版本历史'} <Badge>{versions.data?.length ?? '…'}</Badge>
             </div>
           </div>
         </div>
@@ -168,6 +170,7 @@ export function HistoryPanel({
                         </Button>
                         <Button
                           variant="ghost"
+                          hidden={edge}
                           aria-label={`比较 v${version.number}`}
                           onClick={() =>
                             setCompare({ before: state.global_version, after: version.number })
@@ -215,7 +218,7 @@ export function HistoryPanel({
         <Modal
           open
           onClose={() => setViewing(undefined)}
-          title={`历史版本 v${viewing}`}
+          title={`${edge ? '本地版本' : '历史版本'} v${viewing}`}
           wide
           footer={<Button onClick={() => setViewing(undefined)}>关闭</Button>}
         >

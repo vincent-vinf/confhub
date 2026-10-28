@@ -6,6 +6,7 @@ test_tmp=$(mktemp -d)
 cleanup() {
   if [[ -n "${test_server_pid:-}" ]]; then kill "$test_server_pid" 2>/dev/null || true; fi
   if [[ -n "${test_readonly_pid:-}" ]]; then kill "$test_readonly_pid" 2>/dev/null || true; fi
+  if [[ -n "${test_edge_pid:-}" ]]; then kill "$test_edge_pid" 2>/dev/null || true; fi
   docker rm -f "$test_name" >/dev/null 2>&1 || true
   rm -rf "$test_tmp"
 }
@@ -20,9 +21,12 @@ for attempt in {1..60}; do
 done
 npm --prefix frontend run build
 go build -o "$test_tmp/confhub" ./cmd/main
+docker exec "$test_name" psql -U confhub -d confhub -c 'CREATE DATABASE confhub_edge' >/dev/null
 CONFHUB_DSN="postgres://confhub:ui-test-password@127.0.0.1:$test_port/confhub?sslmode=disable" \
 CONFHUB_ADMIN_PASSWORD=ui-test-password \
 CONFHUB_JWT_SECRET=ui-test-only-secret-at-least-32-bytes \
+CONFHUB_ROLE=cloud \
+CONFHUB_REPLICATION_TOKEN=ui-test-replication-token-at-least-32-bytes \
 CONFHUB_STATIC_DIR="$PWD/frontend/dist" \
 CONFHUB_LISTEN=127.0.0.1:18080 "$test_tmp/confhub" &
 test_server_pid=$!
@@ -38,4 +42,13 @@ CONFHUB_JWT_SECRET=ui-readonly-secret-at-least-32-bytes \
 CONFHUB_STATIC_DIR="$PWD/frontend/dist" \
 CONFHUB_LISTEN=127.0.0.1:18082 "$test_tmp/confhub" &
 test_readonly_pid=$!
+CONFHUB_DSN="postgres://confhub:ui-test-password@127.0.0.1:$test_port/confhub_edge?sslmode=disable" \
+CONFHUB_ADMIN_PASSWORD=ui-edge-password \
+CONFHUB_JWT_SECRET=ui-edge-only-secret-at-least-32-bytes \
+CONFHUB_ROLE=edge \
+CONFHUB_REPLICATION_TOKEN=ui-test-replication-token-at-least-32-bytes \
+CONFHUB_REPLICATION_URL=ws://127.0.0.1:18080/api/replication/watch \
+CONFHUB_STATIC_DIR="$PWD/frontend/dist" \
+CONFHUB_LISTEN=127.0.0.1:18090 "$test_tmp/confhub" &
+test_edge_pid=$!
 wait "$test_server_pid"

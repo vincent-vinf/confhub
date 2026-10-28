@@ -2,6 +2,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
+  CloudDownload,
   ScrollText,
   Users,
   Layers3,
@@ -18,7 +19,7 @@ import {
 } from 'lucide-react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
-import { useAuth, useTheme } from './providers'
+import { useAuth, useTheme, usePermission } from './providers'
 import { Badge, Button, ErrorNotice, Loading } from './ui'
 import { LoginPage, Reauthenticate } from '../pages/login'
 
@@ -52,6 +53,10 @@ function Layout() {
   const { theme, toggle } = useTheme()
   const { user } = useAuth()
   const readOnly = !!user?.read_only
+  const edge = user?.role === 'edge'
+  const manage = usePermission('organization.manage')
+  const readClients = usePermission('clients.read')
+  const readAudit = usePermission('audit.read')
   const health = useQuery({
     queryKey: ['health'],
     queryFn: ({ signal }) => api.ready(signal),
@@ -59,17 +64,19 @@ function Layout() {
     refetchOnWindowFocus: true,
   })
   useEffect(() => setMenu(false), [location.pathname, location.search])
-  const title = location.pathname.startsWith('/audits')
-    ? '操作审计'
-    : location.pathname.startsWith('/users')
-      ? '用户管理'
-      : location.pathname.startsWith('/clients')
-        ? '在线客户端'
-        : location.pathname.startsWith('/organization')
-          ? '命名空间'
-          : location.pathname.startsWith('/settings')
-            ? '账号设置'
-            : '配置管理'
+  const title = location.pathname.startsWith('/sync')
+    ? '同步状态'
+    : location.pathname.startsWith('/audits')
+      ? '操作审计'
+      : location.pathname.startsWith('/users')
+        ? '用户管理'
+        : location.pathname.startsWith('/clients')
+          ? '在线客户端'
+          : location.pathname.startsWith('/organization')
+            ? '命名空间'
+            : location.pathname.startsWith('/settings')
+              ? '账号设置'
+              : '配置管理'
   const sidebar = (
     <>
       <a
@@ -84,7 +91,7 @@ function Layout() {
           <Layers3 size={22} aria-hidden="true" />
         </span>
         <span>
-          ConfHub<small>配置中心</small>
+          ConfHub<small>{edge ? '边缘控制台' : '配置中心'}</small>
         </span>
       </a>
       <div className="nav-section-label">工作空间</div>
@@ -96,35 +103,42 @@ function Layout() {
           <Files size={19} aria-hidden="true" />
           配置管理
         </NavLink>
-        {user?.system_admin && !readOnly && (
+        {manage && (
           <NavLink to="/organization">
             <FolderTree size={19} aria-hidden="true" />
             命名空间
           </NavLink>
         )}
-        {!readOnly && (user?.system_admin || user?.clients_read) && (
+        {readClients && (
           <NavLink to="/clients">
             <Monitor size={19} aria-hidden="true" />
             在线客户端
           </NavLink>
         )}
-        {user?.system_admin && !readOnly && (
+        {manage && (
           <NavLink to="/users">
             <Users size={19} aria-hidden="true" />
             用户管理
           </NavLink>
         )}
-        {user?.system_admin && (
+        {readAudit && (
           <NavLink to="/audits">
             <ScrollText size={19} aria-hidden="true" />
             操作审计
           </NavLink>
         )}
-        {!readOnly && (
-          <NavLink to="/settings">
-            <Settings2 size={19} aria-hidden="true" />
-            账号设置
+        {edge ? (
+          <NavLink to="/sync">
+            <CloudDownload size={19} aria-hidden="true" />
+            同步状态
           </NavLink>
+        ) : (
+          !readOnly && (
+            <NavLink to="/settings">
+              <Settings2 size={19} aria-hidden="true" />
+              账号设置
+            </NavLink>
+          )
         )}
       </nav>
       <div className="sidebar-bottom">
@@ -192,7 +206,7 @@ function Layout() {
             <strong>{title}</strong>
           </div>
           <div className="topbar-actions">
-            {readOnly && <Badge>只读模式</Badge>}
+            {edge ? <Badge>边缘 · 只读</Badge> : readOnly && <Badge>只读模式</Badge>}
             <Button
               variant="ghost"
               className="icon-button"
@@ -221,9 +235,15 @@ function Layout() {
         </header>
         <main id="main" className="page" tabIndex={-1}>
           {(readOnly &&
+            !edge &&
             ['/new', '/organization', '/users', '/settings', '/clients'].some(
               (path) => location.pathname === path || location.pathname.startsWith(path + '/'),
             )) ||
+          (edge &&
+            ['/new', '/organization', '/users', '/audits', '/settings'].some(
+              (path) => location.pathname === path || location.pathname.startsWith(path + '/'),
+            )) ||
+          (!edge && location.pathname.startsWith('/sync')) ||
           ((location.pathname.startsWith('/organization') ||
             location.pathname.startsWith('/users') ||
             location.pathname.startsWith('/audits')) &&

@@ -127,6 +127,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user.clients_read,
       user.grants,
       user.read_only,
+      user.role,
     ],
   )
   useEffect(() => {

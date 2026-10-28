@@ -64,6 +64,7 @@ test('只读实例登录、历史与灰度试算、自动刷新和写入限制',
   for (const name of ['新建配置', '命名空间', '用户管理', '账号设置', '在线客户端']) {
     await expect(page.getByRole('link', { name, exact: true })).toHaveCount(0)
   }
+  await expect(page.getByRole('link', { name: '操作审计', exact: true })).toBeVisible()
   await expect(page.getByRole('checkbox')).toHaveCount(0)
   await page.getByRole('textbox', { name: '搜索本分组配置' }).fill('readonly-ui.yaml')
   await page.getByRole('link', { name: 'readonly-ui.yaml', exact: true }).click()

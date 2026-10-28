@@ -45,7 +45,7 @@ type AuditPage struct {
 }
 
 func (s *Store) BeginAudit(ctx context.Context, a Audit) (int64, error) {
-	if err := s.writable(); err != nil {
+	if err := s.localWritable(); err != nil {
 		return 0, err
 	}
 	row := auditRow{RequestID: a.RequestID, CreatedAt: a.CreatedAt.UnixMicro(), IP: a.IP, Action: a.Action, Subject: a.Subject, Method: a.Method, Result: "pending", DetailsJSON: "{}"}
@@ -55,7 +55,7 @@ func (s *Store) BeginAudit(ctx context.Context, a Audit) (int64, error) {
 
 // Persist the verified actor before entering a handler that can mutate state.
 func (s *Store) IdentifyAudit(ctx context.Context, id int64, user User) error {
-	if err := s.writable(); err != nil {
+	if err := s.localWritable(); err != nil {
 		return err
 	}
 	result := s.db.WithContext(ctx).Model(&auditRow{}).Where(map[string]any{"id": id, "result": "pending"}).Updates(map[string]any{"user_id": user.ID, "username": user.Username})
@@ -68,7 +68,7 @@ func (s *Store) IdentifyAudit(ctx context.Context, id int64, user User) error {
 	return nil
 }
 func (s *Store) FinishAudit(ctx context.Context, a Audit) error {
-	if err := s.writable(); err != nil {
+	if err := s.localWritable(); err != nil {
 		return err
 	}
 	if len(a.Details) == 0 {
