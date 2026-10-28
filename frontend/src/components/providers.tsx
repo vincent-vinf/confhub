@@ -120,7 +120,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [identity.data, identity.error])
   const permissions = JSON.stringify(
-    user && [user.id, user.enabled, user.system_admin, user.clients_read, user.grants],
+    user && [
+      user.id,
+      user.enabled,
+      user.system_admin,
+      user.clients_read,
+      user.grants,
+      user.read_only,
+    ],
   )
   useEffect(() => {
     void queryClient.invalidateQueries({ predicate: (q) => q.queryKey[0] !== 'me' })

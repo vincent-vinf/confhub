@@ -17,6 +17,7 @@ type Settings struct {
 	HistoryLimit                                                                 int
 	CookieSecure                                                                 bool
 	Migrate                                                                      bool
+	ReadOnly                                                                     bool
 }
 
 func Parse(args []string, getenv func(string) string) (Settings, error) {
@@ -35,6 +36,8 @@ func Parse(args []string, getenv func(string) string) (Settings, error) {
 	f.StringVar(&s.AdminPassword, "admin-password", env("ADMIN_PASSWORD", ""), "initial admin password")
 	f.StringVar(&s.JWTSecret, "jwt-secret", env("JWT_SECRET", ""), "shared JWT signing secret (at least 32 bytes)")
 	f.StringVar(&s.StaticDir, "static-dir", env("STATIC_DIR", "/app/frontend"), "React build directory")
+	readOnly, readOnlyErr := strconv.ParseBool(env("READ_ONLY", "false"))
+	f.BoolVar(&s.ReadOnly, "read-only", readOnly, "serve existing data without database writes")
 	// Register string defaults so invalid environment values are rejected rather
 	// than silently replaced by defaults.
 	values := map[string]*string{}
@@ -53,6 +56,18 @@ func Parse(args []string, getenv func(string) string) (Settings, error) {
 	}
 	if err := f.Parse(args); err != nil {
 		return s, err
+	}
+	// An explicit flag overrides the environment, including an invalid value.
+	f.Visit(func(v *flag.Flag) {
+		if v.Name == "read-only" {
+			readOnlyErr = nil
+		}
+	})
+	if readOnlyErr != nil {
+		return s, fmt.Errorf("read-only must be boolean")
+	}
+	if s.ReadOnly && s.Migrate {
+		return s, fmt.Errorf("migrate is unavailable in read-only mode; migrate the writable database")
 	}
 	if f.NArg() != 0 {
 		return s, fmt.Errorf("unexpected argument %q", f.Arg(0))

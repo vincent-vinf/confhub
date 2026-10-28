@@ -20,6 +20,7 @@ type Options struct {
 	JWTExpiry    time.Duration
 	CookieSecure bool
 	StaticDir    string
+	ReadOnly     bool
 }
 type Server struct {
 	hub     *syncer.Hub
@@ -36,7 +37,10 @@ func New(store *storage.Store, hub *syncer.Hub, options Options) (*Server, error
 	r := gin.New()
 	r.SetTrustedProxies(nil)
 	s := &Server{store: store, hub: hub, options: options, router: r}
-	r.Use(s.audit, gin.Recovery())
+	if options.ReadOnly {
+		store.DisableWrites()
+	}
+	r.Use(s.readOnly, s.audit, gin.Recovery())
 	r.Use(func(c *gin.Context) { c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 8<<20); c.Next() })
 	r.POST("/api/admin/login", s.sameOrigin, s.login)
 	a := r.Group("/api/admin", s.authenticate, s.sameOrigin, s.authorize)
@@ -85,6 +89,9 @@ func (s *Server) respond(c *gin.Context, value any, err error) {
 	case errors.Is(err, storage.ErrForbidden):
 		status = 403
 		message = "permission denied"
+	case errors.Is(err, storage.ErrReadOnly):
+		status = 403
+		message = err.Error()
 	case errors.Is(err, storage.ErrUnauthorized):
 		status = 401
 		message = "invalid credentials"

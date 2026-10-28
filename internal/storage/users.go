@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"regexp"
@@ -97,9 +98,13 @@ func validateUserInput(input UserInput) error {
 	return nil
 }
 
-func readUser(tx *gorm.DB, id string) (User, error) {
+func readUser(tx *gorm.DB, id string, lock bool) (User, error) {
 	var row userRow
-	if err := tx.Clauses(clause.Locking{Strength: "SHARE"}).Take(&row, "id = ?", id).Error; err != nil {
+	query := tx
+	if lock {
+		query = query.Clauses(clause.Locking{Strength: "SHARE"})
+	}
+	if err := query.Take(&row, "id = ?", id).Error; err != nil {
 		return User{}, storageError(err)
 	}
 	var grants []grantRow
@@ -114,7 +119,13 @@ func readUser(tx *gorm.DB, id string) (User, error) {
 }
 func (s *Store) User(ctx context.Context, id string) (User, error) {
 	var u User
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error { var err error; u, err = readUser(tx, id); return err })
+	readOnly := s.readOnly.Load()
+	opts := &sql.TxOptions{}
+	if readOnly {
+		opts.Isolation = sql.LevelRepeatableRead
+		opts.ReadOnly = true
+	}
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error { var err error; u, err = readUser(tx, id, !readOnly); return err }, opts)
 	return u, err
 }
 func (s *Store) Users(ctx context.Context, after string, limit int) ([]User, error) {
@@ -122,20 +133,30 @@ func (s *Store) Users(ctx context.Context, after string, limit int) ([]User, err
 		return nil, fmt.Errorf("%w: limit must be 1–100", config.ErrInvalid)
 	}
 	users := []User{}
+	readOnly := s.readOnly.Load()
+	opts := &sql.TxOptions{}
+	if readOnly {
+		opts.Isolation = sql.LevelRepeatableRead
+		opts.ReadOnly = true
+	}
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var rows []userRow
-		if err := tx.Clauses(clause.Locking{Strength: "SHARE"}).Where(clause.Gt{Column: "username", Value: after}).Order("username").Limit(limit).Find(&rows).Error; err != nil {
+		query := tx
+		if !readOnly {
+			query = query.Clauses(clause.Locking{Strength: "SHARE"})
+		}
+		if err := query.Where(clause.Gt{Column: "username", Value: after}).Order("username").Limit(limit).Find(&rows).Error; err != nil {
 			return err
 		}
 		for _, row := range rows {
-			u, err := readUser(tx, row.ID)
+			u, err := readUser(tx, row.ID, !readOnly)
 			if err != nil {
 				return err
 			}
 			users = append(users, u)
 		}
 		return nil
-	})
+	}, opts)
 	return users, err
 }
 func replaceGrants(tx *gorm.DB, id string, grants []Grant) error {
@@ -177,7 +198,7 @@ func (s *Store) CreateUser(ctx context.Context, username, password string, input
 	if err = replaceGrants(tx, row.ID, input.Grants); err != nil {
 		return User{}, err
 	}
-	u, err := readUser(tx, row.ID)
+	u, err := readUser(tx, row.ID, true)
 	if err != nil {
 		return User{}, err
 	}
@@ -192,7 +213,7 @@ func (s *Store) UpdateUser(ctx context.Context, id string, revision int64, input
 		return User{}, err
 	}
 	defer tx.Rollback()
-	u, err := readUser(tx, id)
+	u, err := readUser(tx, id, true)
 	if err != nil {
 		return User{}, err
 	}
@@ -212,7 +233,7 @@ func (s *Store) UpdateUser(ctx context.Context, id string, revision int64, input
 	if err = replaceGrants(tx, id, input.Grants); err != nil {
 		return User{}, err
 	}
-	u, err = readUser(tx, id)
+	u, err = readUser(tx, id, true)
 	if err != nil {
 		return User{}, err
 	}
@@ -224,7 +245,7 @@ func (s *Store) DeleteUser(ctx context.Context, id string, revision int64) error
 		return err
 	}
 	defer tx.Rollback()
-	u, err := readUser(tx, id)
+	u, err := readUser(tx, id, true)
 	if err != nil {
 		return err
 	}
@@ -240,6 +261,9 @@ func (s *Store) DeleteUser(ctx context.Context, id string, revision int64) error
 	return tx.Commit().Error
 }
 func (s *Store) ResetPassword(ctx context.Context, id string, revision int64, password string) error {
+	if err := s.writable(); err != nil {
+		return err
+	}
 	if err := validatePassword(password); err != nil {
 		return err
 	}

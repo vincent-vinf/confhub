@@ -90,7 +90,12 @@ export type UserInput = {
   clients_read: boolean
   grants: Grant[]
 }
-export type User = UserInput & { id: string; username: string; revision: number }
+export type User = UserInput & {
+  id: string
+  username: string
+  revision: number
+  read_only?: boolean
+}
 
 export type Audit = {
   id: string

@@ -19,7 +19,7 @@ import {
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import { useAuth, useTheme } from './providers'
-import { Button, ErrorNotice, Loading } from './ui'
+import { Badge, Button, ErrorNotice, Loading } from './ui'
 import { LoginPage, Reauthenticate } from '../pages/login'
 
 export function AppGate() {
@@ -51,6 +51,7 @@ function Layout() {
   const navigate = useNavigate()
   const { theme, toggle } = useTheme()
   const { user } = useAuth()
+  const readOnly = !!user?.read_only
   const health = useQuery({
     queryKey: ['health'],
     queryFn: ({ signal }) => api.ready(signal),
@@ -95,19 +96,19 @@ function Layout() {
           <Files size={19} aria-hidden="true" />
           配置管理
         </NavLink>
-        {user?.system_admin && (
+        {user?.system_admin && !readOnly && (
           <NavLink to="/organization">
             <FolderTree size={19} aria-hidden="true" />
             命名空间
           </NavLink>
         )}
-        {(user?.system_admin || user?.clients_read) && (
+        {!readOnly && (user?.system_admin || user?.clients_read) && (
           <NavLink to="/clients">
             <Monitor size={19} aria-hidden="true" />
             在线客户端
           </NavLink>
         )}
-        {user?.system_admin && (
+        {user?.system_admin && !readOnly && (
           <NavLink to="/users">
             <Users size={19} aria-hidden="true" />
             用户管理
@@ -119,10 +120,12 @@ function Layout() {
             操作审计
           </NavLink>
         )}
-        <NavLink to="/settings">
-          <Settings2 size={19} aria-hidden="true" />
-          账号设置
-        </NavLink>
+        {!readOnly && (
+          <NavLink to="/settings">
+            <Settings2 size={19} aria-hidden="true" />
+            账号设置
+          </NavLink>
+        )}
       </nav>
       <div className="sidebar-bottom">
         <div className="service-status">
@@ -189,6 +192,7 @@ function Layout() {
             <strong>{title}</strong>
           </div>
           <div className="topbar-actions">
+            {readOnly && <Badge>只读模式</Badge>}
             <Button
               variant="ghost"
               className="icon-button"
@@ -216,7 +220,11 @@ function Layout() {
           </div>
         </header>
         <main id="main" className="page" tabIndex={-1}>
-          {((location.pathname.startsWith('/organization') ||
+          {(readOnly &&
+            ['/new', '/organization', '/users', '/settings', '/clients'].some(
+              (path) => location.pathname === path || location.pathname.startsWith(path + '/'),
+            )) ||
+          ((location.pathname.startsWith('/organization') ||
             location.pathname.startsWith('/users') ||
             location.pathname.startsWith('/audits')) &&
             !user?.system_admin) ||

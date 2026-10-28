@@ -18,6 +18,9 @@ import (
 // snapshot. Stable connections are not rewritten; expired replicas are invisible.
 // This transaction is independent of the configuration mutation/change stream.
 func (s *Store) SyncPresence(ctx context.Context, instance string, clients []clientinfo.Client, ttl time.Duration) error {
+	if err := s.writable(); err != nil {
+		return err
+	}
 	if instance == "" || len(instance) > 36 || ttl <= 0 {
 		return fmt.Errorf("%w: invalid presence lease", config.ErrInvalid)
 	}
@@ -135,6 +138,9 @@ func stringValues(values []string) []any {
 }
 
 func (s *Store) RemovePresence(ctx context.Context, instance string) error {
+	if err := s.writable(); err != nil {
+		return err
+	}
 	return s.db.WithContext(ctx).Where(map[string]any{"id": instance}).Delete(&instanceRow{}).Error
 }
 
@@ -256,6 +262,9 @@ func (s *Store) TagSuggestions(ctx context.Context, tag, prefix string) ([]strin
 // CleanupPresence removes a bounded batch of abandoned replicas. A refreshed
 // lease is rechecked at deletion so a concurrent heartbeat is not removed.
 func (s *Store) CleanupPresence(ctx context.Context) error {
+	if err := s.writable(); err != nil {
+		return err
+	}
 	db := s.db.WithContext(ctx)
 	now, err := s.databaseTime(db)
 	if err != nil {

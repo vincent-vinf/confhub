@@ -20,6 +20,9 @@ func validatePassword(password string) error {
 	return nil
 }
 func (s *Store) InitializeAdmin(ctx context.Context, password string) error {
+	if err := s.writable(); err != nil {
+		return err
+	}
 	var row userRow
 	err := s.db.WithContext(ctx).Take(&row, "username = ?", "admin").Error
 	if err == nil {
@@ -52,6 +55,9 @@ func (s *Store) InitializeAdmin(ctx context.Context, password string) error {
 	return tx.Commit().Error
 }
 func (s *Store) ChangePassword(ctx context.Context, id string, authVersion int64, oldPassword, newPassword string) error {
+	if err := s.writable(); err != nil {
+		return err
+	}
 	if len(oldPassword) > 72 {
 		return ErrUnauthorized
 	}

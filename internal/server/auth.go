@@ -15,6 +15,13 @@ import (
 
 const cookieName = "confhub_admin"
 
+func (s *Server) cookieName() string {
+	if s.options.ReadOnly {
+		return "confhub_readonly_admin"
+	}
+	return cookieName
+}
+
 type userClaims struct {
 	jwt.RegisteredClaims
 	AuthVersion int64 `json:"auth_version"`
@@ -41,7 +48,7 @@ func (s *Server) sameOrigin(c *gin.Context) {
 	c.Next()
 }
 func (s *Server) authenticate(c *gin.Context) {
-	cookie, err := c.Request.Cookie(cookieName)
+	cookie, err := c.Request.Cookie(s.cookieName())
 	if err != nil {
 		c.AbortWithStatus(401)
 		return
@@ -77,7 +84,7 @@ func (s *Server) authenticate(c *gin.Context) {
 	c.Next()
 }
 func (s *Server) setCookie(c *gin.Context, value string, maxAge int) {
-	http.SetCookie(c.Writer, &http.Cookie{Name: cookieName, Value: value, Path: "/api/admin", HttpOnly: true, Secure: s.options.CookieSecure, SameSite: http.SameSiteStrictMode, MaxAge: maxAge})
+	http.SetCookie(c.Writer, &http.Cookie{Name: s.cookieName(), Value: value, Path: "/api/admin", HttpOnly: true, Secure: s.options.CookieSecure, SameSite: http.SameSiteStrictMode, MaxAge: maxAge})
 }
 func (s *Server) login(c *gin.Context) {
 	var body struct {

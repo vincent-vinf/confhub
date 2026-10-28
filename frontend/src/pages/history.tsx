@@ -1,4 +1,4 @@
-import { usePermission } from '../components/providers'
+import { useAuth, usePermission } from '../components/providers'
 import { Select } from '../components/select'
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
@@ -24,8 +24,9 @@ export function HistoryPanel({
   onEditBeta: () => void
 }) {
   const writable = usePermission('config.write', configKey.namespace, configKey.group)
+  const readOnly = !!useAuth().user?.read_only
   const versions = useQuery({
-    queryKey: ['versions', configKey],
+    queryKey: readOnly ? ['versions', configKey, state.global_version] : ['versions', configKey],
     queryFn: ({ signal }) => allVersions(configKey, signal),
   })
   const [page, setPage] = useState(0)

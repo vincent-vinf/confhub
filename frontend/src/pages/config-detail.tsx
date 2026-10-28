@@ -21,7 +21,7 @@ import { formatContent, validateContent } from '../lib/format'
 import { formats, type ConfigKey, type ConfigState, type Draft } from '../lib/types'
 import { CodeEditor, type EditorHandle } from '../components/editor'
 import { Badge, Button, ErrorNotice, Loading, Modal } from '../components/ui'
-import { useDirty, useToast, usePermission } from '../components/providers'
+import { useAuth, useDirty, useToast, usePermission } from '../components/providers'
 import { ChangeDialog } from '../components/change-dialog'
 import { HistoryPanel } from './history'
 import { RulesPanel } from './rules'
@@ -36,11 +36,13 @@ export function ConfigDetailPage() {
 }
 function Detail({ configKey }: { configKey: ConfigKey }) {
   const writable = usePermission('config.write', configKey.namespace, configKey.group)
+  const readOnly = !!useAuth().user?.read_only
   const query = useQuery({
     queryKey: configQueryKey(configKey),
     queryFn: ({ signal }) => api.state(configKey, signal),
     staleTime: 0,
     refetchOnMount: 'always',
+    refetchInterval: readOnly ? 5000 : false,
   })
   const client = useQueryClient()
   const toast = useToast()
@@ -61,11 +63,20 @@ function Detail({ configKey }: { configKey: ConfigKey }) {
   const [reset, setReset] = useState(false)
   const editor = useRef<EditorHandle>(null)
   useEffect(() => {
-    if (query.data && !query.isFetching && !query.error && !baseline) {
+    if (
+      query.data &&
+      !query.isFetching &&
+      !query.error &&
+      (!baseline || (!writable && baseline !== query.data))
+    ) {
       setBaseline(query.data)
-      setDraft(draftFrom(query.data))
+      try {
+        setDraft(draftFrom(query.data, draftRef.current?.target))
+      } catch {
+        setDraft(draftFrom(query.data))
+      }
     }
-  }, [query.data, query.isFetching, query.error, baseline])
+  }, [query.data, query.isFetching, query.error, baseline, writable])
   let target: ReturnType<typeof targetVersion> | undefined
   try {
     if (baseline && draft) target = targetVersion(baseline, draft.target)
@@ -229,7 +240,7 @@ function Detail({ configKey }: { configKey: ConfigKey }) {
               <label>
                 {writable ? '编辑目标' : '查看目标'}
                 <Select
-                  aria-label="编辑目标"
+                  aria-label={writable ? '编辑目标' : '查看目标'}
                   value={draft.target ?? 'global'}
                   onValueChange={(value) => {
                     const next = {
@@ -321,7 +332,7 @@ function Detail({ configKey }: { configKey: ConfigKey }) {
               id="version-description"
               readOnly={!writable}
               placeholder="简要说明这次内容变更…"
-              value={draft.description}
+              value={writable ? draft.description : (target?.description ?? '')}
               onChange={(e) => setDraft({ ...draft, description: e.target.value })}
             />
           </div>

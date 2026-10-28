@@ -76,3 +76,31 @@ func TestMigrationNeedsDSNButDoesNotRequireJWT(t *testing.T) {
 		t.Fatal("legal minimum rejected", err)
 	}
 }
+
+func TestReadOnlyMode(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		env  string
+		want bool
+	}{
+		{nil, "", false},
+		{nil, "true", true},
+		{[]string{"--read-only"}, "", true},
+		{[]string{"--read-only=false"}, "true", false},
+		{[]string{"--read-only"}, "invalid", true},
+	} {
+		s, err := settings.Parse(tc.args, environment(map[string]string{"CONFHUB_READ_ONLY": tc.env}))
+		if err != nil || s.ReadOnly != tc.want {
+			t.Fatalf("args=%v env=%q: readonly=%v err=%v", tc.args, tc.env, s.ReadOnly, err)
+		}
+	}
+	for _, args := range [][]string{nil, {"migrate"}} {
+		value := "invalid"
+		if len(args) > 0 {
+			value = "true"
+		}
+		if _, err := settings.Parse(args, environment(map[string]string{"CONFHUB_READ_ONLY": value})); err == nil {
+			t.Fatal("invalid read-only settings accepted", args)
+		}
+	}
+}

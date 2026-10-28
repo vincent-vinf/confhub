@@ -110,6 +110,10 @@ func auditUser(c *gin.Context, user storage.User) {
 	}
 }
 func (s *Server) audit(c *gin.Context) {
+	if s.options.ReadOnly {
+		c.Next()
+		return
+	}
 	action := auditAction(c.Request.Method, c.FullPath())
 	if action == "" {
 		c.Next()

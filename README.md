@@ -30,6 +30,8 @@ make frontend-install frontend-build build
 
 ## 参数
 
+只读部署可使用 `--read-only` 或 `CONFHUB_READ_ONLY=true`，连接外部复制的数据库副本，保留读取、订阅和只读控制台。部署及同步要求见 [只读运行模式](docs/read-only.md)。
+
 flag 优先于同名环境变量。不读取启动配置文件。轮询间隔至少 1ms，同步失败时限至少 2ms；轮询间隔不能超过失败时限的一半，以保证故障检测时限。
 
 | flag | 环境变量（前缀 `CONFHUB_`） | 默认值 |
@@ -41,6 +43,7 @@ flag 优先于同名环境变量。不读取启动配置文件。轮询间隔至
 | `--jwt-secret` | `JWT_SECRET` | 服务启动必填，至少 32 字节，所有实例相同 |
 | `--jwt-expiry` | `JWT_EXPIRY` | `2h` |
 | `--cookie-secure` | `COOKIE_SECURE` | `false`，HTTPS 部署设置 true |
+| `--read-only` | `READ_ONLY` | `false`，启用后禁止数据库写入 |
 | `--static-dir` | `STATIC_DIR` | `/app/frontend` |
 | `--poll-interval` | `POLL_INTERVAL` | `100ms` |
 | `--sync-failure-timeout` | `SYNC_FAILURE_TIMEOUT` | `2s` |

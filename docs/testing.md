@@ -6,6 +6,8 @@
 
 需要 Go 1.25、C 编译器（race）、Docker、Python 3.10+、Node/npm；浏览器回归还需要 Chromium。数据库镜像固定为 `registry.cn-hangzhou.aliyuncs.com/bodesi/postgres:17`。
 
+手动提供的集成测试 PostgreSQL 账号需要创建 schema 和角色的权限；只读测试会创建隔离 schema 的临时 SELECT-only 账号，并在结束后清理。完整运行器使用自己的临时数据库，自动满足此要求。
+
 Python SDK 的 dev 依赖包含 coverage、mypy 和 ruff。使用已有 venv，或通过以下命令创建：
 
 ```sh
@@ -22,7 +24,7 @@ npm --prefix frontend exec playwright install chromium
 | 命令 | 范围 |
 | --- | --- |
 | `make test-unit` | 无数据库业务规则/启动参数，以及 Go/Python SDK 单元测试 |
-| `make test-integration` | 存储、同步、HTTP 集成；要求显式 `CONFHUB_TEST_POSTGRES_DSN` |
+| `make test-integration` | 存储、同步、HTTP 和只读真实进程集成；要求显式 `CONFHUB_TEST_POSTGRES_DSN` |
 | `make test-race` | 后端 race；要求显式测试 DSN |
 | `make sdk-check` | Go SDK/系统程序 vet、Python mypy/ruff |
 | `make test-fuzz` | IP 单点包含性质、名称/正文/标签健壮性，各 5 秒、2 个 worker |
@@ -115,7 +117,7 @@ go -C tests/system run -race . \
 
 Go 使用语句覆盖率，Python 使用语句/行覆盖率。Go 的 `backend-merged.out` 合并数据库/协议测试与真实运行服务生成的 coverage 数据，同一源码块取最大命中数，保留所有未命中块，不将百分比平均。后端分母包含 `cmd/main` 和有可执行语句的生产 `internal` 包，不统计测试辅助包、测试代码或第三方依赖。
 
-门槛为后端 ≥80%、业务规则 ≥90%、Go/Python SDK 各 ≥85%。前端 V8 单测统计 `src/lib/api.ts/config.ts/format.ts` 的行/分支；页面和组件通过真实 Playwright 回归，尚未计入这份单测覆盖率。前端暂不设数字门槛，不将逻辑覆盖率称为全前端覆盖率。
+门槛为后端 ≥80%、业务规则 ≥90%、Go/Python SDK 各 ≥85%。前端 V8 单测统计 `src/lib/api.ts/config.ts/format.ts` 的行/分支；页面和组件通过真实 Playwright 回归，尚未计入这份单测覆盖率。标签自动补全另有组件级回归测试，使用真实 QueryClient、受控时钟和延迟响应，验证请求期间的方向键、刷新后选中项保持及不同标签间的建议隔离。前端暂不设数字门槛，不将逻辑覆盖率称为全前端覆盖率。
 
 报告位于 `test-results/run-*`，主要文件：
 

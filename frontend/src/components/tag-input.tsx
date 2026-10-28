@@ -22,7 +22,7 @@ export function TagInput({
   const id = useId()
   const popup = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
-  const [active, setActive] = useState(-1)
+  const [active, setActive] = useState<string | null>(null)
   const [prefix, setPrefix] = useState(value)
   useEffect(() => {
     const timer = setTimeout(() => setPrefix(value), 150)
@@ -32,6 +32,10 @@ export function TagInput({
     queryKey: ['client-tags', tag, prefix],
     queryFn: ({ signal }) => api.clientTags(tag, prefix, signal),
     enabled: canReadClients && open && (isName || !!tag),
+    // Keep matching suggestions usable while the debounced prefix request runs.
+    // Values from a different tag must never carry over to this field.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === tag ? previous : undefined,
     staleTime: 5000,
     gcTime: 60000,
   })
@@ -43,7 +47,7 @@ export function TagInput({
   ]
     .filter((item) => item.startsWith(value))
     .sort()
-  const selected = active >= 0 && active < suggestions.length ? active : -1
+  const selected = active === null ? -1 : suggestions.indexOf(active)
   useEffect(() => {
     if (!open || selected < 0) return
     const container = popup.current
@@ -59,7 +63,7 @@ export function TagInput({
   function choose(item: string) {
     onChange(item)
     setOpen(false)
-    setActive(-1)
+    setActive(null)
   }
   return (
     <div className="tag-autocomplete">
@@ -76,12 +80,12 @@ export function TagInput({
         onFocus={() => setOpen(true)}
         onBlur={() => {
           setOpen(false)
-          setActive(-1)
+          setActive(null)
         }}
         onChange={(event) => {
           onChange(event.target.value)
           setOpen(true)
-          setActive(-1)
+          setActive(null)
         }}
         onKeyDown={(event) => {
           if (event.key === 'Escape' && open) {
@@ -93,11 +97,11 @@ export function TagInput({
           if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && suggestions.length) {
             event.preventDefault()
             setOpen(true)
-            setActive(
+            const index =
               event.key === 'ArrowDown'
                 ? (selected + 1) % suggestions.length
-                : (selected - 1 + suggestions.length) % suggestions.length,
-            )
+                : ((selected < 0 ? 0 : selected) - 1 + suggestions.length) % suggestions.length
+            setActive(suggestions[index])
           }
           if (event.key === 'Enter' && open && selected >= 0) {
             event.preventDefault()

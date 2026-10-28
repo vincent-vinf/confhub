@@ -7,6 +7,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	mysqlsql "github.com/go-sql-driver/mysql"
@@ -28,9 +29,41 @@ var migrations embed.FS
 const SchemaVersion = 6
 
 type Store struct {
-	db      *gorm.DB
-	pool    *sql.DB
-	dialect string
+	db       *gorm.DB
+	pool     *sql.DB
+	dialect  string
+	readOnly atomic.Bool
+}
+
+var ErrReadOnly = errors.New("instance is read-only")
+
+// DisableWrites also protects callers outside the HTTP management boundary.
+func (s *Store) DisableWrites() { s.readOnly.Store(true) }
+
+func (s *Store) writable() error {
+	if s.readOnly.Load() {
+		return ErrReadOnly
+	}
+	return nil
+}
+
+// CheckSchema performs only SELECTs; migration drivers may initialize tables
+// even when only inspecting their version, so replicas must not use them.
+func (s *Store) CheckSchema(ctx context.Context) error {
+	var row struct {
+		Version int
+		Dirty   bool
+	}
+	if err := s.db.WithContext(ctx).Table("schema_migrations").Take(&row).Error; err != nil {
+		return fmt.Errorf("read schema version: %w", err)
+	}
+	if row.Dirty {
+		return fmt.Errorf("database schema version %d is dirty", row.Version)
+	}
+	if row.Version != SchemaVersion {
+		return fmt.Errorf("schema version %d; expected %d: migrate the writable database first", row.Version, SchemaVersion)
+	}
+	return nil
 }
 
 func Open(ctx context.Context, dialect, dsn string) (*Store, error) {

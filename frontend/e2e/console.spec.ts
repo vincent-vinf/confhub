@@ -847,7 +847,7 @@ test('在线客户端只读展示、标签补全与 IP 区间规则', async ({ p
 
 test('长标签建议列表的键盘选中项保持可见', async ({ page }) => {
   await login(page)
-  const name = 'keyboard-tags.json'
+  const name = `keyboard-tags-${crypto.randomUUID()}.json`
   await save(page.request, name, '{"ok":true}')
   await page.goto(url(name))
   await page.evaluate(() => {
@@ -875,8 +875,7 @@ test('长标签建议列表的键盘选中项保持可见', async ({ page }) => 
     )
     .toBe(1)
   await expect(input).toBeFocused()
-  // Observe each keyboard result before the next event; presence refreshes and
-  // focus restoration must finish before navigating the suggestion list.
+  // Observe each keyboard result, including during debounced suggestion requests.
   for (let i = 1; i <= 30; i++) {
     await input.press('ArrowDown')
     await expect(

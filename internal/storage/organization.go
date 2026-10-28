@@ -11,12 +11,18 @@ import (
 )
 
 func (s *Store) CreateNamespace(ctx context.Context, name string) error {
+	if err := s.writable(); err != nil {
+		return err
+	}
 	if err := config.ValidateName(name); err != nil {
 		return err
 	}
 	return storageError(s.db.WithContext(ctx).Create(&namespaceRow{Name: name}).Error)
 }
 func (s *Store) CreateGroup(ctx context.Context, namespace, name string) error {
+	if err := s.writable(); err != nil {
+		return err
+	}
 	if err := config.ValidateName(namespace); err != nil {
 		return err
 	}

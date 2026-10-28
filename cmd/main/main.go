@@ -33,8 +33,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	if err = storage.Migrate(options.Database, options.DSN, !options.Migrate); err != nil {
-		return fmt.Errorf("migration: %w", err)
+	if !options.ReadOnly {
+		if err = storage.Migrate(options.Database, options.DSN, !options.Migrate); err != nil {
+			return fmt.Errorf("migration: %w", err)
+		}
 	}
 	if options.Migrate {
 		slog.Info("schema migration completed")
@@ -47,25 +49,35 @@ func run() error {
 		return err
 	}
 	defer store.Close()
-	if err = store.InitializeAdmin(bootstrapCtx, options.AdminPassword); err != nil {
-		return err
+	if options.ReadOnly {
+		store.DisableWrites()
+		if err = store.CheckSchema(bootstrapCtx); err != nil {
+			return err
+		}
+	} else {
+		if err = store.InitializeAdmin(bootstrapCtx, options.AdminPassword); err != nil {
+			return err
+		}
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	hub := syncer.New(store, syncer.Options{PollInterval: options.PollInterval, FailureTimeout: options.SyncFailureTimeout, CacheBytes: options.CacheBytes})
-	app, err := server.New(store, hub, server.Options{JWTSecret: options.JWTSecret, JWTExpiry: options.JWTExpiry, CookieSecure: options.CookieSecure, StaticDir: options.StaticDir})
+	app, err := server.New(store, hub, server.Options{JWTSecret: options.JWTSecret, JWTExpiry: options.JWTExpiry, CookieSecure: options.CookieSecure, StaticDir: options.StaticDir, ReadOnly: options.ReadOnly})
 	if err != nil {
 		return err
 	}
 	var workers sync.WaitGroup
-	workers.Add(3)
+	workers.Add(1)
 	go func() { defer workers.Done(); hub.Run(ctx) }()
-	go func() { defer workers.Done(); app.RunPresence(ctx) }()
-	go func() { defer workers.Done(); maintain(ctx, store, options) }()
+	if !options.ReadOnly {
+		workers.Add(2)
+		go func() { defer workers.Done(); app.RunPresence(ctx) }()
+		go func() { defer workers.Done(); maintain(ctx, store, options) }()
+	}
 	httpServer := &http.Server{Addr: options.Listen, Handler: app.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 64 << 10}
 	result := make(chan error, 1)
 	go func() { result <- httpServer.ListenAndServe() }()
-	slog.Info("service started", "version", version, "listen", options.Listen, "database", options.Database)
+	slog.Info("service started", "version", version, "listen", options.Listen, "database", options.Database, "read_only", options.ReadOnly)
 	select {
 	case <-ctx.Done():
 	case err = <-result:

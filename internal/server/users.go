@@ -79,7 +79,12 @@ func (s *Server) groups(c *gin.Context) {
 	s.respond(c, visible, err)
 }
 func (s *Server) userRoutes(a *gin.RouterGroup) {
-	a.GET("/me", func(c *gin.Context) { c.JSON(200, currentUser(c)) })
+	a.GET("/me", func(c *gin.Context) {
+		c.JSON(200, struct {
+			storage.User
+			ReadOnly bool `json:"read_only,omitempty"`
+		}{currentUser(c), s.options.ReadOnly})
+	})
 	a.GET("/users", func(c *gin.Context) {
 		limit, err := integer(c, "limit", 25)
 		if err != nil {

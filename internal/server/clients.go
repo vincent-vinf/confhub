@@ -33,7 +33,7 @@ func (s *Server) clientTags(c *gin.Context) {
 // RunPresence shares compact connection metadata across management replicas.
 // Presence failure never blocks publication or WebSocket transport writes.
 func (s *Server) RunPresence(ctx context.Context) {
-	if s.hub == nil {
+	if s.hub == nil || s.options.ReadOnly {
 		return
 	}
 	instance := uuid.NewString()

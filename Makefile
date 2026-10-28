@@ -39,7 +39,7 @@ test-fuzz:
 
 test-integration:
 	@test -n "$(CONFHUB_TEST_POSTGRES_DSN)" || (echo "CONFHUB_TEST_POSTGRES_DSN is required"; exit 1)
-	go test -count=1 ./internal/storage ./internal/syncer ./internal/server
+	go test -count=1 ./cmd/... ./internal/storage ./internal/syncer ./internal/server
 
 test-race:
 	@test -n "$(CONFHUB_TEST_POSTGRES_DSN)" || (echo "CONFHUB_TEST_POSTGRES_DSN is required"; exit 1)

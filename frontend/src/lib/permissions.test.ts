@@ -52,3 +52,16 @@ it('授权合并、全局范围、客户端权限和禁用管理员', () => {
   expect(allows({ ...user, system_admin: true }, 'organization.manage')).toBe(true)
   expect(allows({ ...user, enabled: false, system_admin: true }, 'organization.manage')).toBe(false)
 })
+
+it('实例只读优先于管理员和写授权，读取仍受原有范围约束', () => {
+  const reader = { ...user, read_only: true }
+  expect(allows(reader, 'config.read', 'dev', 'apps')).toBe(true)
+  expect(allows(reader, 'config.read', 'unknown', 'apps')).toBe(false)
+  expect(allows(reader, 'config.write', 'dev', 'apps')).toBe(false)
+  const admin = { ...reader, system_admin: true, clients_read: true }
+  expect(allows(admin, 'config.read', 'prod', 'apps')).toBe(true)
+  expect(allows(admin, 'audit.read')).toBe(true)
+  for (const action of ['config.write', 'organization.manage', 'users.manage', 'clients.read']) {
+    expect(allows(admin, action, 'dev', 'apps')).toBe(false)
+  }
+})

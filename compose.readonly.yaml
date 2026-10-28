@@ -1,0 +1,38 @@
+# External database only: provision and replicate its schema/data separately.
+x-app: &app
+  build: .
+  image: confhub:dev
+  restart: unless-stopped
+  cpus: ${CONFHUB_APP_CPUS:-1.0}
+  mem_limit: ${CONFHUB_APP_MEMORY:-1g}
+  memswap_limit: ${CONFHUB_APP_MEMORY:-1g}
+  ulimits:
+    nofile:
+      soft: 65536
+      hard: 65536
+  env_file:
+    - .env
+  environment:
+    GOMEMLIMIT: ${CONFHUB_APP_GO_MEMORY:-768MiB}
+    CONFHUB_READ_ONLY: "true"
+    CONFHUB_DATABASE: ${CONFHUB_DATABASE:-postgres}
+    CONFHUB_DSN: ${CONFHUB_DSN:?set CONFHUB_DSN to the replicated database}
+    CONFHUB_JWT_SECRET: ${CONFHUB_JWT_SECRET:?set CONFHUB_JWT_SECRET}
+  healthcheck:
+    test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health/ready"]
+    interval: 5s
+    timeout: 2s
+    retries: 3
+    start_period: 20s
+services:
+  app:
+    <<: *app
+    ports: ["${CONFHUB_PORT:-8080}:8080"]
+  app2:
+    <<: *app
+    profiles: [ha]
+    ports: ["${CONFHUB_PORT2:-8081}:8080"]
+  app3:
+    <<: *app
+    profiles: [ha]
+    ports: ["${CONFHUB_PORT3:-8082}:8080"]
