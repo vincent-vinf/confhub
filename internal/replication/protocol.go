@@ -253,6 +253,9 @@ func Follow(ctx context.Context, c Conn, mirror Mirror, lease Lease, observed fu
 	if err != nil {
 		return err
 	}
+	if status.RebuildRequired {
+		return ErrSourceChanged
+	}
 	for {
 		waitCtx, cancel := context.WithTimeout(ctx, peerIdleTimeout)
 		f, err := receive(waitCtx, c)

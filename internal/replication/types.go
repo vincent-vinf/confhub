@@ -37,10 +37,11 @@ type Lease struct {
 }
 type Status struct {
 	Cursor
-	Ready        bool      `json:"ready"`
-	LastSuccess  time.Time `json:"last_success,omitempty"`
-	Owner        string    `json:"sync_owner,omitempty"`
-	LeaseExpires time.Time `json:"lease_expires,omitempty"`
+	Ready           bool      `json:"ready"`
+	RebuildRequired bool      `json:"rebuild_required"`
+	LastSuccess     time.Time `json:"last_success,omitempty"`
+	Owner           string    `json:"sync_owner,omitempty"`
+	LeaseExpires    time.Time `json:"lease_expires,omitempty"`
 }
 type Source interface {
 	Watermark(context.Context) (Cursor, error)
@@ -50,5 +51,6 @@ type Mirror interface {
 	MirrorStatus(context.Context) (Status, error)
 	AcquireMirrorLease(context.Context, string, time.Duration) (Lease, bool, error)
 	ReleaseMirrorLease(context.Context, Lease) error
+	RequireMirrorRebuild(context.Context, Lease) error
 	ApplyMirror(context.Context, Lease, Manifest, io.Reader) error
 }

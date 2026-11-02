@@ -45,26 +45,40 @@ func delay(ctx context.Context, d time.Duration) bool {
 }
 func (w *Worker) Run(ctx context.Context) {
 	owner := uuid.NewString()
+	// Retain an observed divergence even if lease renewal/persistence fails.
+	// A subsequent ownership attempt must persist it before opening a session.
+	rebuildRequired := false
 	for ctx.Err() == nil {
 		queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		lease, ok, err := w.mirror.AcquireMirrorLease(queryCtx, owner, w.leaseDuration)
 		cancel()
 		if err == nil && ok {
-			w.update(func(s *ConnectionStatus) { s.Active = true; s.Error = "" })
-			w.runOwned(ctx, lease)
+			w.update(func(s *ConnectionStatus) {
+				s.Active = true
+				if !rebuildRequired {
+					s.Error = ""
+				}
+			})
+			w.runOwned(ctx, lease, &rebuildRequired)
 			releaseCtx, stop := context.WithTimeout(context.Background(), 5*time.Second)
 			_ = w.mirror.ReleaseMirrorLease(releaseCtx, lease)
 			stop()
 			w.update(func(s *ConnectionStatus) { s.Active = false; s.Connected = false })
 		} else if err != nil {
-			w.update(func(s *ConnectionStatus) { s.Error = "local_storage_unavailable" })
+			w.update(func(s *ConnectionStatus) {
+				s.Error = "local_storage_unavailable"
+				if errors.Is(err, ErrSourceChanged) {
+					s.Error = "source_changed_rebuild_required"
+				}
+			})
 		}
 		if !delay(ctx, 250*time.Millisecond) {
 			return
 		}
 	}
 }
-func (w *Worker) runOwned(ctx context.Context, lease Lease) {
+func (w *Worker) runOwned(ctx context.Context, lease Lease, rebuildRequired *bool) {
+	ownerCtx := ctx
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	done := make(chan struct{})
@@ -90,7 +104,23 @@ func (w *Worker) runOwned(ctx context.Context, lease Lease) {
 	}()
 	defer func() { cancel(); <-done }()
 	backoff := 250 * time.Millisecond
-	for ctx.Err() == nil {
+	for ownerCtx.Err() == nil {
+		if *rebuildRequired {
+			// Renewal failure must not cancel persistence or permit another dial.
+			persistCtx, stop := context.WithTimeout(ownerCtx, 5*time.Second)
+			err := w.mirror.RequireMirrorRebuild(persistCtx, lease)
+			stop()
+			if err == nil || errors.Is(err, ErrLeaseLost) {
+				return
+			}
+			if !delay(ownerCtx, 250*time.Millisecond) {
+				return
+			}
+			continue
+		}
+		if ctx.Err() != nil {
+			return
+		}
 		dialCtx, stop := context.WithTimeout(ctx, 10*time.Second)
 		conn, err := w.dial(dialCtx)
 		stop()
@@ -106,6 +136,10 @@ func (w *Worker) runOwned(ctx context.Context, lease Lease) {
 				s.Error = "source_changed_rebuild_required"
 			}
 		})
+		if errors.Is(err, ErrSourceChanged) {
+			*rebuildRequired = true
+			continue
+		}
 		if errors.Is(err, ErrLeaseLost) {
 			return
 		}

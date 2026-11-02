@@ -16,7 +16,7 @@ make frontend-install frontend-build build
 ./bin/confhub --static-dir frontend/dist
 ```
 
-当前 schema 9。已有 schema 4/5/6/7/8 可保留 admin 密码及配置数据升级：停止旧实例，使用新二进制执行下方迁移命令，再启动新实例；从 schema 4 升级需重新登录。schema 1/2/3 仍不兼容，需按此前策略使用空数据库重建，不能通过 Force 修改标记绕过。
+当前 schema 10。已有 schema 4/5/6/7/8/9 可保留 admin 密码及配置数据升级：停止旧实例，使用新二进制执行下方迁移命令，再启动新实例；从 schema 4 升级需重新登录。schema 1/2/3 仍不兼容，需按此前策略使用空数据库重建，不能通过 Force 修改标记绕过。
 
 管理员通过“用户管理”创建账号并授予只读或读写权限，支持整个命名空间或指定分组。在线客户端查看单独授权。权限覆盖控制台和管理 API，SDK 的 HTTP GET/WebSocket 仍无需鉴权。详见 [多用户与权限](docs/users-permissions.md)。系统管理员可在“操作审计”查看管理操作并按用户、IP、操作、结果及时间筛选，见 [审计说明](docs/audit.md)。
 

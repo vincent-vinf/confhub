@@ -108,6 +108,9 @@ func (s *Store) checkedMirror(db *gorm.DB, lease replication.Lease, lock bool) (
 	if row.Owner != lease.Owner || row.Epoch != lease.Epoch || row.ExpiresAt <= now {
 		return row, replication.ErrLeaseLost
 	}
+	if row.RebuildRequired {
+		return row, replication.ErrSourceChanged
+	}
 	return row, nil
 }
 func checkMirrorBatch(row mirrorRow, batch replication.Manifest) error {

@@ -92,8 +92,14 @@ export function SyncPage() {
                 </div>
               </dl>
             </section>
-            {connection.error && (
-              <ErrorNotice error={errors[connection.error] || '同步暂时异常，正在重试。'} />
+            {(mirror.rebuild_required || connection.error) && (
+              <ErrorNotice
+                error={
+                  mirror.rebuild_required
+                    ? errors.source_changed_rebuild_required
+                    : errors[connection.error || ''] || '同步暂时异常，正在重试。'
+                }
+              />
             )}
           </>
         )

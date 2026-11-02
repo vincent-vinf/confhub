@@ -26,8 +26,11 @@ func TestIndependentReplicasConvergeAndUnaffectedGrayClientStaysPinned(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := syncer.New(store, syncer.Options{PollInterval: 10 * time.Millisecond, FailureTimeout: 100 * time.Millisecond, CacheBytes: 1024})
-	b := syncer.New(store, syncer.Options{PollInterval: 10 * time.Millisecond, FailureTimeout: 100 * time.Millisecond, CacheBytes: 1024})
+	// This test verifies publication and gray selection, not outage detection.
+	// Keep the production failure window; a 100ms window also caps real database
+	// queries at 50ms and spuriously disconnects sessions during parallel suites.
+	a := syncer.New(store, syncer.Options{PollInterval: 10 * time.Millisecond, FailureTimeout: 2 * time.Second, CacheBytes: 1024})
+	b := syncer.New(store, syncer.Options{PollInterval: 10 * time.Millisecond, FailureTimeout: 2 * time.Second, CacheBytes: 1024})
 	go a.Run(ctx)
 	go b.Run(ctx)
 	deadline := time.Now().Add(time.Second)
@@ -53,7 +56,7 @@ func TestIndependentReplicasConvergeAndUnaffectedGrayClientStaysPinned(t *testin
 	if err = gray.Subscribe(ctx, k); err != nil {
 		t.Fatal(err)
 	}
-	nextCtx, stop := context.WithTimeout(ctx, time.Second)
+	nextCtx, stop := context.WithTimeout(ctx, 5*time.Second)
 	defer stop()
 	first, err := normal.Next(nextCtx)
 	if err != nil || first.Version != 1 {

@@ -311,6 +311,13 @@ func TestSchemaSevenMirrorRemainsReadableAndUpgradesOnIncrement(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
+	guardDown, err := os.ReadFile("migrations/postgres/000010_mirror_rebuild_guard.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(string(guardDown)); err != nil {
+		t.Fatal(err)
+	}
 	down, err := os.ReadFile("migrations/postgres/000008_mirror_generations.down.sql")
 	if err != nil {
 		t.Fatal(err)

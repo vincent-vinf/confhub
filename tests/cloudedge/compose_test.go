@@ -36,9 +36,10 @@ type mutation struct {
 }
 type status struct {
 	Mirror struct {
-		Ready    bool   `json:"ready"`
-		Sequence int64  `json:"sequence"`
-		Owner    string `json:"sync_owner"`
+		Ready           bool   `json:"ready"`
+		RebuildRequired bool   `json:"rebuild_required"`
+		Sequence        int64  `json:"sequence"`
+		Owner           string `json:"sync_owner"`
 	} `json:"mirror"`
 	Connection struct {
 		Active    bool `json:"active_sync_worker"`
@@ -668,6 +669,35 @@ func TestCloudEdgeCompose(t *testing.T) {
 					python.expect("live after broker restart", 8, "")
 				})
 			}
+			scene("source_rollback_blocks_imports_across_edge_restart", func(t *testing.T) {
+				before, code := d.get(d.edges[0], main, nil)
+				if code != 200 {
+					t.Fatal("read before rollback", code)
+				}
+				// Owned database fault injection models restoring a source with an
+				// unchanged identity and a lower durable stream sequence.
+				sequence := d.compose(true, "exec", "-T", "db", "psql", "-U", "confhub", "-d", "confhub", "-Atc", "SELECT sequence FROM change_stream WHERE id=1")
+				if _, err := strconv.ParseInt(sequence, 10, 64); err != nil {
+					t.Fatal("source sequence", err)
+				}
+				d.compose(true, "exec", "-T", "db", "psql", "-U", "confhub", "-d", "confhub", "-c", "UPDATE change_stream SET sequence=0 WHERE id=1")
+				for i := range d.edges {
+					eventually(t, "persist source rollback guard", func() bool { return d.edgeStatus(i).Mirror.RebuildRequired })
+				}
+				d.compose(true, "exec", "-T", "db", "psql", "-U", "confhub", "-d", "confhub", "-c", "UPDATE change_stream SET sequence="+sequence+" WHERE id=1")
+				s = d.save(main, s, "must wait for explicit rebuild", "")
+				d.compose(false, "restart", "app", "app2")
+				d.ready()
+				d.expect(main, before.Content, before.Version, "")
+				no.expect(t, before.Content, before.Version, "")
+				goGray.expect(t, before.Content, before.Version, "")
+				python.expect(before.Content, before.Version, "")
+				for i := range d.edges {
+					if !d.edgeStatus(i).Mirror.RebuildRequired {
+						t.Fatal("edge restart erased rebuild guard")
+					}
+				}
+			})
 		})
 	}
 }

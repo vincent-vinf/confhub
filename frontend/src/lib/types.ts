@@ -129,6 +129,7 @@ export type EdgeStatus = {
     source: string
     sequence: number
     ready: boolean
+    rebuild_required: boolean
     last_success?: string
     sync_owner?: string
     lease_expires?: string

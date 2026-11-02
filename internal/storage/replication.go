@@ -26,6 +26,7 @@ type mirrorRow struct {
 	SourceID         string
 	SourceSequence   int64
 	Ready            bool
+	RebuildRequired  bool
 	LastSuccess      int64
 	Owner            string
 	Epoch, ExpiresAt int64
@@ -130,7 +131,7 @@ func (s *Store) Export(ctx context.Context, after replication.Cursor, out io.Wri
 func (s *Store) MirrorStatus(ctx context.Context) (replication.Status, error) {
 	var row mirrorRow
 	err := s.db.WithContext(ctx).Take(&row, 1).Error
-	status := replication.Status{Cursor: replication.Cursor{Source: row.SourceID, Sequence: row.SourceSequence}, Ready: row.Ready, Owner: row.Owner}
+	status := replication.Status{Cursor: replication.Cursor{Source: row.SourceID, Sequence: row.SourceSequence}, Ready: row.Ready, RebuildRequired: row.RebuildRequired, Owner: row.Owner}
 	if row.LastSuccess > 0 {
 		status.LastSuccess = time.UnixMicro(row.LastSuccess).UTC()
 	}
@@ -153,6 +154,9 @@ func (s *Store) AcquireMirrorLease(ctx context.Context, owner string, duration t
 		var row mirrorRow
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Take(&row, 1).Error; err != nil {
 			return err
+		}
+		if row.RebuildRequired {
+			return replication.ErrSourceChanged
 		}
 		now, err := s.databaseTime(tx)
 		if err != nil {
@@ -178,6 +182,27 @@ func (s *Store) ReleaseMirrorLease(ctx context.Context, lease replication.Lease)
 		return err
 	}
 	return s.db.WithContext(ctx).Model(&mirrorRow{}).Where(map[string]any{"id": 1, "owner": lease.Owner, "epoch": lease.Epoch}).Updates(map[string]any{"owner": "", "expires_at": 0}).Error
+}
+
+// RequireMirrorRebuild fences further imports across workers and restarts while
+// keeping the last complete mirror readable. Only its current owner may latch it.
+func (s *Store) RequireMirrorRebuild(ctx context.Context, lease replication.Lease) error {
+	if err := s.localWritable(); err != nil {
+		return err
+	}
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var row mirrorRow
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Take(&row, 1).Error; err != nil {
+			return err
+		}
+		if row.Owner != lease.Owner || row.Epoch != lease.Epoch {
+			return replication.ErrLeaseLost
+		}
+		if row.RebuildRequired {
+			return nil
+		}
+		return tx.Model(&row).Update("rebuild_required", true).Error
+	})
 }
 
 func validateRecord(r replication.Record, full bool) error {

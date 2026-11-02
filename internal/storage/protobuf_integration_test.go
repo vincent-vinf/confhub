@@ -113,6 +113,13 @@ func TestSchemaEightJSONMirrorRemainsReadableOfflineAndAcceptsProtobuf(t *testin
 	if _, err := db.Exec(string(down)); err != nil {
 		t.Fatal(err)
 	}
+	guardDown, err := os.ReadFile("migrations/postgres/000010_mirror_rebuild_guard.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(string(guardDown)); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.Exec("UPDATE schema_migrations SET version=8"); err != nil {
 		t.Fatal(err)
 	}
