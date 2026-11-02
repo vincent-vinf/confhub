@@ -93,6 +93,22 @@ CONFHUB_RUN_CLOUD_EDGE=1 CONFHUB_EDGE_TEST_IMAGE=confhub:edge-console \
 
 本次报告位于 `test-results/rebase-main-20261028/`：`full/` 保留首轮失败，`full-recheck/` 为后续完整分层回归；Compose 首轮、单独 NATS 和连续两轮的日志分别为 `compose-first.log`、`nats-recheck.log` 和 `compose-recheck.log`。
 
+## NATS 生产场景复测（2026-10-28）
+
+实际 Broker 断网恢复在首次三轮完整测试中出现两次 40 秒内未追平。通过 Broker 连接/订阅信息与进程栈确认：网络分区后，Broker 可能暂时保留已失效的云端队列订阅，新的会话请求被分配给旧订阅后没有回复，原实现单次请求耗尽整个连接预算。
+
+修复将会话握手改为总计最多 10 秒、单次请求最多 1 秒的有界重试；每次重试创建独立会话标识，认证和协议拒绝直接失败。新增真实 NATS 回归用例先将请求交给无响应队列成员，原实现失败，修复后连续 10 次通过。未延长原有 Compose 恢复断言的超时。
+
+| 复测 | 结果 |
+| --- | --- |
+| 真实 NATS 传输测试，race，7 项 × 3 轮 | 21/21 通过 |
+| 最小网络分区恢复，6 轮 | 6/6 通过，恢复约 0.61–6.28 秒 |
+| NATS 云边 Compose，race，8 场景 × 5 轮 | 40/40 通过 |
+| Broker 停止后继续离线服务、云端修改、Broker 重启及 SDK 追平 | 5/5 通过，重启至镜像及 Go/Python SDK 收敛约 3.87–8.27 秒 |
+| 同步模块 vet 与 diff 检查 | 通过 |
+
+新增 Broker 重启场景覆盖离线主配置发布、beta/规则修改、新建及删除、边缘继续提供旧镜像、恢复后的普通/灰度 Go 与 Python 客户端，以及恢复后再次发布。测试使用默认 Broker 心跳；文档另提供生产心跳配置建议。报告位于 `test-results/nats-production-20261028/`，原始失败、修复前回归失败和最终通过记录分别保留。测试仅覆盖单 Broker 和 PostgreSQL 17，不代表 NATS 集群、生产 WAN 或容量验收。
+
 ## Standards
 
 最终审查通过，没有剩余发现。通信抽象、GORM 常规读写、显式迁移、flag/env 参数和公共接口测试符合现有约定。

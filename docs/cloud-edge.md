@@ -24,6 +24,10 @@ type Conn interface {
 
 ## 多实例与故障
 
+NATS 建连总预算为 10 秒，调用方更短的超时优先。单次会话创建请求等待 1 秒；超时或暂时没有监听者时，间隔 100ms 重试，每次分配新的会话 ID 和 subject。认证拒绝或协议错误直接失败。这样可以绕过网络恢复后 Broker 尚未清除的旧队列订阅，迟到响应也不会进入后续会话。发送成功和会话创建成功都不代表镜像已经提交，仍以边缘持久游标为准。
+
+生产 NATS 可在服务端配置 `ping_interval: "2s"`、`ping_max: 2`，加快清除失效连接及其队列订阅。这与 ConfHub 内部 NATS 客户端的心跳分别作用于两端；跨网络部署应结合链路抖动调整。测试使用 Broker 默认心跳验证恢复，不依赖该优化。
+
 同一边缘的多个应用实例共享本地数据库，通过数据库租约选出一个同步任务。租约默认 30 秒，每三分之一租期续期，世代编号防止旧任务覆盖新任务。全量以不超过 128 条记录或约 4 MiB 正文的批次写入私有代次，单条聚合记录不会拆开。暂存写入不持有租约行锁或可见变更流锁，续期可独立进行；每批前检查租约，最终切换再锁定并核验世代和基线。中途失去租约的旧任务不能激活镜像。暂存失败不改变当前可见内容，后台按清理批量回收废弃代次。新镜像通过 `state_proto` 保存 Protobuf，PostgreSQL 使用 BYTEA，MySQL 使用 LONGBLOB。
 
 全量切换通过持久通知水位触发所有边缘实例刷新缓存和订阅，不在切换事务中逐条写通知。Hub 分批刷新并保留进度，健康读取期间持续保持就绪；刷新期间的新发布仍按后续游标处理。旧代次保持不可见，按有限批次删除，不在切换事务中清空整个镜像。
@@ -99,6 +103,10 @@ make test-cloud-edge
 CONFHUB_EDGE_TEST_IMAGE=confhub:dev make test-cloud-edge
 # 输出标准 Go JSON 测试报告：
 CONFHUB_RUN_CLOUD_EDGE=1 go -C tests/cloudedge test -race -json -count=1 -timeout=15m ./...
+# 只验证 NATS，包含 Broker 停机、恢复及后续持续更新；连续运行三轮。
+CONFHUB_RUN_CLOUD_EDGE=1 CONFHUB_EDGE_TEST_IMAGE=confhub:dev \
+  go -C tests/cloudedge test -race -v -count=3 \
+  -run '^TestCloudEdgeCompose$/^nats$' -timeout=15m ./...
 ```
 
 Go 测试程序自行创建两个隔离 Compose 项目、随机端口/凭据及网络，分别运行 WebSocket 和 NATS；结束删除自身的容器、卷与网络，不读取部署 `.env`。故障注入仅针对这些自建项目。测试中的 2 秒日志保留、3 秒租约用于快速验证故障恢复，生产默认值不受影响。

@@ -136,7 +136,11 @@ func (d *deployment) logFailure() {
 	}
 	for _, side := range []struct{ project, file string }{{d.cloudProject, "deploy/cloud/compose.yaml"}, {d.edgeProject, "deploy/edge/compose.yaml"}} {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		cmd := exec.CommandContext(ctx, "docker", "compose", "--env-file", d.envFile, "-p", side.project, "-f", side.file, "logs", "--no-color", "--tail", "60")
+		args := []string{"compose", "--env-file", d.envFile, "-p", side.project, "-f", side.file, "--profile", "ha"}
+		if d.mode == "nats" && side.project == d.cloudProject {
+			args = append(args, "--profile", "nats")
+		}
+		cmd := exec.CommandContext(ctx, "docker", append(args, "logs", "--no-color", "--tail", "60")...)
 		cmd.Dir = d.root
 		raw, err := cmd.CombinedOutput()
 		cancel()
@@ -622,6 +626,48 @@ func TestCloudEdgeCompose(t *testing.T) {
 					eventually(t, "full replacement removed ghost", func() bool { _, code := d.get(address, ghost, nil); return code == 404 })
 				}
 			})
+			if mode == "nats" {
+				scene("broker_restart_preserves_offline_service_and_resumes_updates", func(t *testing.T) {
+					d.compose(true, "stop", "-t", "0", "nats")
+					eventually(t, "broker outage detected", func() bool {
+						return !d.edgeStatus(0).Connection.Connected && !d.edgeStatus(1).Connection.Connected
+					})
+					s = d.save(main, s, "published during broker outage", "")
+					s = d.setRules(main, s, rules(true), s.Global)
+					s = d.save(main, s, "beta during broker outage", "beta")
+					created := sdk.Key{Namespace: "public", Group: "DEFAULT_GROUP", Name: "created-offline"}
+					d.save(created, state{}, "created during broker outage", "")
+					d.call("DELETE", path(large), baseline(d.read(large)), nil)
+					d.ready()
+					d.expect(main, "after recovery", 6, "")
+					d.expect(large, largeContent, 1, "")
+					for _, address := range d.edges {
+						if _, code := d.get(address, created, nil); code != 404 {
+							t.Fatal("offline edge exposed unsynchronized config", code)
+						}
+					}
+					started := time.Now()
+					d.compose(true, "start", "nats")
+					d.expect(main, "beta during broker outage", 0, "ip")
+					no.expect(t, "published during broker outage", 7, "")
+					goGray.expect(t, "beta during broker outage", 0, "ip")
+					python.expect("beta during broker outage", 0, "ip")
+					d.expect(created, "created during broker outage", 1, "")
+					for _, address := range d.edges {
+						eventually(t, "broker recovery removed deleted config", func() bool { _, code := d.get(address, large, nil); return code == 404 })
+					}
+					t.Logf("broker restart to mirrored state and Go/Python SDK convergence: %s", time.Since(started))
+					s = d.setRules(main, s, rules(false), 0)
+					d.expect(main, "published during broker outage", 7, "")
+					goGray.expect(t, "published during broker outage", 7, "")
+					python.expect("published during broker outage", 7, "")
+					s = d.save(main, s, "live after broker restart", "")
+					d.expect(main, "live after broker restart", 8, "")
+					no.expect(t, "live after broker restart", 8, "")
+					goGray.expect(t, "live after broker restart", 8, "")
+					python.expect("live after broker restart", 8, "")
+				})
+			}
 		})
 	}
 }

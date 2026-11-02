@@ -7,11 +7,65 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/nats-io/nats.go"
 	"github.com/vincent-vinf/confhub/internal/config"
 	"github.com/vincent-vinf/confhub/internal/replication"
 	"github.com/vincent-vinf/confhub/internal/replication/transport"
 	"github.com/vincent-vinf/confhub/internal/testutil"
 )
+
+func TestNATSHandshakeRetriesAfterUnresponsiveQueueMember(t *testing.T) {
+	address := os.Getenv("CONFHUB_TEST_NATS_URL")
+	if address == "" {
+		t.Skip("set CONFHUB_TEST_NATS_URL for real broker integration")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	subject, token := "confhub.retry."+uuid.NewString(), "replication-test-01234567890123456789"
+	stale, err := nats.Connect(address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stale.Close()
+	first := make(chan struct{}, 1)
+	// The first request reaches a queue member which never replies. The healthy
+	// listener starts afterwards, as when a cloud replica reconnects after a partition.
+	sub, err := stale.QueueSubscribe(subject+".open", "confhub-cloud-sync", func(_ *nats.Msg) { first <- struct{}{} })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stale.FlushWithContext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	dialDone := make(chan error, 1)
+	go func() {
+		conn, err := transport.DialNATS(ctx, address, subject, token)
+		if conn != nil {
+			conn.Close()
+		}
+		dialDone <- err
+	}()
+	select {
+	case <-first:
+	case <-ctx.Done():
+		t.Fatal("first handshake did not reach the unresponsive queue member")
+	}
+	if err := sub.Unsubscribe(); err != nil {
+		t.Fatal(err)
+	}
+	if err := stale.FlushWithContext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	listenerDone := make(chan error, 1)
+	go func() {
+		listenerDone <- transport.ListenNATS(ctx, address, subject, token, func(ctx context.Context, _ replication.Conn) { <-ctx.Done() })
+	}()
+	defer func() { cancel(); <-listenerDone }()
+	if err := <-dialDone; err != nil {
+		t.Fatal("handshake did not retry a request lost to an unresponsive queue member:", err)
+	}
+}
 
 type slowReceive struct{ replication.Conn }
 

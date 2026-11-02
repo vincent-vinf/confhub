@@ -135,15 +135,51 @@ func DialNATS(ctx context.Context, address, subject, token string) (replication.
 	if !ValidSubject(subject) {
 		return nil, errors.New("invalid NATS replication subject")
 	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	nc, err := connectNATS(ctx, address)
 	if err != nil {
 		return nil, err
 	}
+	transferred := false
+	defer func() {
+		if !transferred {
+			nc.Close()
+		}
+	}()
+	for {
+		conn, err := openNATSSession(ctx, nc, subject, token)
+		if err == nil {
+			conn.owns = true
+			transferred = true
+			return conn, nil
+		}
+		// The broker can retain a dead cloud's queue subscription after a
+		// partition. Retry lost requests within the dial budget instead of
+		// spending the entire budget waiting for that stale queue member.
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, nats.ErrNoResponders) {
+			return nil, err
+		}
+		timer := time.NewTimer(100 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func openNATSSession(ctx context.Context, nc *nats.Conn, subject, token string) (*natsConn, error) {
+	// Never reuse session subjects: a delayed reply from an earlier request
+	// must not attach two cloud handlers to the successful session.
 	session := uuid.NewString()
 	prefix := subject + ".session." + session
-	conn, err := subscribe(nc, prefix+".down", prefix+".up", true)
+	conn, err := subscribe(nc, prefix+".down", prefix+".up", false)
 	if err != nil {
-		nc.Close()
 		return nil, err
 	}
 	if err := nc.FlushWithContext(ctx); err != nil {
@@ -155,7 +191,9 @@ func DialNATS(ctx context.Context, address, subject, token string) (replication.
 		conn.Close()
 		return nil, err
 	}
-	reply, err := nc.RequestWithContext(ctx, subject+".open", raw)
+	requestCtx, stop := context.WithTimeout(ctx, time.Second)
+	reply, err := nc.RequestWithContext(requestCtx, subject+".open", raw)
+	stop()
 	var response wire.OpenReply
 	if err == nil {
 		err = proto.Unmarshal(reply.Data, &response)
