@@ -101,7 +101,7 @@ clean:
 	rm -rf bin
 
 docker-image-build-local:
-	docker build --platform=linux/amd64 \
+	docker build --platform=linux/amd64 --provenance=false --sbom=false \
 		--build-arg IMAGE_TAG=$(IMAGE_TAG) \
 		-t $(DOCKER_IMAGE):$(IMAGE_TAG) .
 
