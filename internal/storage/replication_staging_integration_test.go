@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
@@ -298,100 +297,5 @@ func TestGenerationResetCursorSurvivesEventCleanup(t *testing.T) {
 	changes, err := edge.Changes(ctx, 0, 100)
 	if err != nil || changes.PurgedThrough < reset {
 		t.Fatal("cleanup moved reset watermark backwards", changes, err)
-	}
-}
-
-func TestSchemaSevenMirrorRemainsReadableAndUpgradesOnIncrement(t *testing.T) {
-	dsn := testutil.Database(t)
-	if err := storage.Migrate("postgres", dsn, false); err != nil {
-		t.Fatal(err)
-	}
-	db, err := sql.Open("postgres", dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	guardDown, err := os.ReadFile("migrations/postgres/000010_mirror_rebuild_guard.down.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(string(guardDown)); err != nil {
-		t.Fatal(err)
-	}
-	down, err := os.ReadFile("migrations/postgres/000008_mirror_generations.down.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(string(down)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec("UPDATE schema_migrations SET version=7"); err != nil {
-		t.Fatal(err)
-	}
-	ctx := context.Background()
-	edge, err := storage.Open(ctx, "postgres", dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer edge.Close()
-	key := config.Key{Namespace: "public", Group: "DEFAULT_GROUP", Name: "legacy"}
-	saved, err := edge.Save(ctx, key, config.Edit{Content: "offline baseline", Format: "text"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec("UPDATE replication_mirror SET ready=true,source_id='legacy-source',source_sequence=9"); err != nil {
-		t.Fatal(err)
-	}
-	if err := storage.Migrate("postgres", dsn, true); err == nil {
-		t.Fatal("implicit schema7 upgrade accepted")
-	}
-	if err := storage.Migrate("postgres", dsn, false); err != nil {
-		t.Fatal(err)
-	}
-	edge.DisableManagementWrites()
-	current, _, err := edge.MirrorCurrent(ctx, key)
-	if err != nil || current.ID != saved.State.ID || current.Versions[1].Content != "offline baseline" {
-		t.Fatal(current, err)
-	}
-	if names, err := edge.MirrorNamespaces(ctx); err != nil || len(names) != 1 || names[0] != "public" {
-		t.Fatal(names, err)
-	}
-	if groups, err := edge.MirrorGroups(ctx, "public"); err != nil || len(groups) != 1 || groups[0] != "DEFAULT_GROUP" {
-		t.Fatal(groups, err)
-	}
-	if rows, err := edge.MirrorList(ctx, "public", "DEFAULT_GROUP", "", 25); err != nil || len(rows) != 1 || rows[0].ID != saved.State.ID || rows[0].GlobalVersion != 1 {
-		t.Fatal(rows, err)
-	}
-	next := *saved.State
-	next.Revision++
-	next.LastVersion = 2
-	next.GlobalVersion = 2
-	v := next.Versions[1]
-	v.Number = 2
-	v.Content = "caught up"
-	next.Versions = map[int64]config.Version{2: v}
-	var data bytes.Buffer
-	if err := replication.NewRecordEncoder(&data).Encode(replication.Record{Key: key, State: &next}); err != nil {
-		t.Fatal(err)
-	}
-	lease, _, err := edge.AcquireMirrorLease(ctx, "owner", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	batch := replication.Manifest{Cursor: replication.Cursor{Source: "legacy-source", Sequence: 10}, After: 9, Count: 1}
-	if err := edge.ApplyMirror(ctx, lease, batch, &data); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := edge.Cleanup(ctx, "cleaner", 100, time.Hour, 128); err != nil {
-		t.Fatal(err)
-	}
-	reopened, err := storage.Open(ctx, "postgres", dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer reopened.Close()
-	current, _, err = reopened.MirrorCurrent(ctx, key)
-	if err != nil || current.ID != saved.State.ID || current.Versions[2].Content != "caught up" {
-		t.Fatal(current, err)
 	}
 }

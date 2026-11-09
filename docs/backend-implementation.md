@@ -1,5 +1,7 @@
 # 后端实现与验证
 
+> 迁移合并说明（2026-11-09）：原 10 次迁移已合并为完整初始 schema 1，仅支持空数据库初始化。下文旧 schema 编号及升级/降级验证为历史记录，对应兼容迁移和测试已移除；当前启动要求见 [README](../README.md)。
+
 范围依据 [requirements.md](requirements.md)、[architecture.md](architecture.md) 与 docs/adr 下的架构决策。本次实现 Go 服务端及必要的单元、集成测试；React 页面与客户端 SDK 已完成；不执行压测。
 
 ## 已确认的测试边界

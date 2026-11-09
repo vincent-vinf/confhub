@@ -26,7 +26,7 @@ import (
 //go:embed migrations/*/*.sql
 var migrations embed.FS
 
-const SchemaVersion = 10
+const SchemaVersion = 1
 
 type Store struct {
 	db                 *gorm.DB
@@ -185,8 +185,9 @@ func Migrate(dialect, dsn string, initializeOnly bool) (err error) {
 	if dirty {
 		return fmt.Errorf("database schema version %d is dirty; repair schema before migration", version)
 	}
-	if err == nil && version >= 1 && version <= 3 {
-		return fmt.Errorf("legacy schema %d is unsupported by the shared beta model; recreate an empty database instead of migrating existing configuration data", version)
+
+	if err == nil && version > SchemaVersion {
+		return fmt.Errorf("database schema version %d is newer than supported %d; use an empty database or a matching binary", version, SchemaVersion)
 	}
 
 	if initializeOnly && err == nil {

@@ -1,5 +1,7 @@
 # React 控制台实现与验证
 
+> 迁移合并说明（2026-11-09）：原 10 次迁移已合并为完整初始 schema 1，仅支持空数据库初始化。下文旧 schema 编号及升级/降级验证为历史记录，对应兼容迁移和测试已移除；当前启动要求见 [README](../README.md)。
+
 首次实现日期：2026-10-09；灰度模型调整：2026-10-10。需求依据为 [requirements.md](requirements.md)、[architecture.md](architecture.md) 和 [backend-api.md](backend-api.md)。视觉规则见 [设计系统](../design-system/confhub/MASTER.md)。
 
 ## 视觉与导航

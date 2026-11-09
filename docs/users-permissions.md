@@ -65,6 +65,6 @@ User 返回 id、username、enabled、system_admin、clients_read、revision、g
 
 ## 数据库升级
 
-schema 5 新增 users/user_grants，复制 schema 4 的 admin 密码摘要并移除旧 admin 表。配置、历史、beta 和规则不变。当前空数据库初始化自动迁移至 schema 6（增加审计表）；已有 schema 4/5 需要停止旧实例，使用新二进制执行 `confhub migrate`，再启动新实例。旧 admin JWT 缺少用户身份和认证版本，升级后需要重新登录。
+完整初始迁移（schema 1）直接创建 users/user_grants 等当前模型的表，不创建旧 admin 表。首次启动使用配置的初始密码创建 admin，重复启动不会覆盖已保存密码。可通过 `confhub migrate` 单独初始化空数据库。
 
-schema 1/2/3 仍拒绝迁移，按此前策略重建。PostgreSQL/MySQL 均提供 migrate 文件；集成验证只使用 PostgreSQL。
+此前试用版数据库不提供升级兼容，需使用空数据库重建。PostgreSQL/MySQL 均提供 migrate 文件；集成验证只使用 PostgreSQL。

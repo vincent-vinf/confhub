@@ -1,5 +1,7 @@
 # 测试运行指南
 
+> 迁移合并说明（2026-11-09）：原 10 次迁移已合并为完整初始 schema 1，仅支持空数据库初始化。下文旧 schema 编号及升级/降级验证为历史记录，对应兼容迁移和测试已移除；当前启动要求见 [README](../README.md)。
+
 本文说明 [测试计划](testing-plan.md) 已落地的入口。测试依据公开业务和协议，不以覆盖率替代关键行为验证。PostgreSQL 是本阶段唯一真实数据库验收后端，MySQL 尚未通过真实数据库验收。性能验证使用独立入口，资源档位与实测范围见 [压测指南](load-testing.md)。
 
 ## 环境准备
@@ -271,3 +273,16 @@ python3 tests/run.py --layers integration,system --coverage-gates
 `make test-nacos-interop` 启动临时 Nacos 2.5.1（独立 Derby、关闭认证、仅回环地址）和 PostgreSQL 17，通过真实 Nacos 导出/导入 API 与 ConfHub 管理 API 验证双向互通，退出后删除本次容器。需要 Docker、curl、openssl；不需要部署数据库凭据。使用虚构配置，逐项核对名称、分组、正文、格式、描述和 CRLF。Nacos 发布 API 只支持六种共有格式，`ini` 会被改为 text，因此 INI 另从 ConfHub 导出后验证 Nacos ZIP 导入，不能把它当成 Nacos 发布接口的能力。
 
 归档单测纳入 test-unit；PostgreSQL 的事务、规则保留、并发抢占与删除重建，以及 HTTP 权限/审计/只读验证纳入集成层。系统套件 `archive` 使用 Go/Python 正式 SDK，验证跨实例导入后的全量/灰度 GET 与通知、失败重试、三种策略及筛选导出。前端 archive.spec.ts 覆盖下载、上传、冲突重预览及明暗窄屏无障碍；原读取用户、只读和 edge 回归同时验证导出能力。
+
+## 初始迁移合并验证（2026-11-09）
+
+PostgreSQL/MySQL 原 10 次迁移合并为 `000001_initial`，直接创建当前 19 张业务表；移除旧版本升级及降级兼容测试，保留 dirty 和版本不匹配保护。
+
+本次在独立 PostgreSQL 17 容器中完成：
+
+- `CONFHUB_TEST_POSTGRES_DSN=… go test -race -count=1 ./cmd/... ./internal/...`、`go vet ./cmd/... ./internal/...` 和后端构建全部通过。
+- 空库初始化、重复初始化保留 admin 密码和配置、初始迁移 down/up、dirty 拒绝、较高版本拒绝且不修改版本或配置均通过。
+- 新二进制连接空数据库，完成就绪检查、admin 登录、发布配置及管理端读取；重启时改变启动密码，验证原密码仍可登录且配置保持。
+- 对比合并前全部迁移与新初始迁移生成的 PostgreSQL 结构：19 张表的 96 个字段、34 个约束、32 个索引一致。
+
+MySQL 迁移同步合并，本次未运行真实 MySQL 测试。临时数据库、进程和二进制在验证后清理，未修改既有部署数据。

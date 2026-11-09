@@ -4,10 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"database/sql"
-	"encoding/json"
 	"io"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -48,7 +45,7 @@ func TestExportUsesProtobufAndPreservesConfigurationText(t *testing.T) {
 	}
 }
 
-func TestSchemaEightJSONMirrorRemainsReadableOfflineAndAcceptsProtobuf(t *testing.T) {
+func TestProtobufMirrorPreservesMainAndBetaAcrossRestartAndIncrement(t *testing.T) {
 	cloud := testutil.Store(t)
 	dsn := testutil.Database(t)
 	if err := storage.Migrate("postgres", dsn, false); err != nil {
@@ -85,54 +82,10 @@ func TestSchemaEightJSONMirrorRemainsReadableOfflineAndAcceptsProtobuf(t *testin
 	if err := edge.ApplyMirror(ctx, lease, initial, &data); err != nil {
 		t.Fatal(err)
 	}
-	// Prepare an actual schema-8 JSON snapshot, then upgrade without contacting
-	// the cloud. SQL here constructs the old fixture; assertions use Store APIs.
-	db, err := sql.Open("postgres", dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	down, err := os.ReadFile("migrations/postgres/000009_mirror_protobuf.down.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(string(down)); err == nil {
-		t.Fatal("downgrade accepted a mirror containing protobuf data")
-	}
-	current, _, err := edge.MirrorCurrent(ctx, k)
-	if err != nil || current == nil || current.Beta == nil || current.Versions[1].Content != "offline main" || current.Beta.Content != "offline beta ☁\n\t" {
-		t.Fatal("refused downgrade damaged the mirror", current, err)
-	}
-	legacy, err := json.Marshal(m.State)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec("UPDATE replication_configs SET state_json=$1,state_proto=NULL", string(legacy)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(string(down)); err != nil {
-		t.Fatal(err)
-	}
-	guardDown, err := os.ReadFile("migrations/postgres/000010_mirror_rebuild_guard.down.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(string(guardDown)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec("UPDATE schema_migrations SET version=8"); err != nil {
-		t.Fatal(err)
-	}
-	if err := storage.Migrate("postgres", dsn, true); err == nil {
-		t.Fatal("implicit schema-8 upgrade accepted")
-	}
-	if err := storage.Migrate("postgres", dsn, false); err != nil {
-		t.Fatal(err)
-	}
 	edge.DisableManagementWrites()
-	current, _, err = edge.MirrorCurrent(ctx, k)
+	current, _, err := edge.MirrorCurrent(ctx, k)
 	if err != nil || current == nil || current.Beta == nil || current.ID != m.State.ID || current.Versions[1].Content != "offline main" || current.Beta.Content != "offline beta ☁\n\t" || len(current.Rules) != 1 {
-		t.Fatal("offline JSON mirror changed after upgrade", current, err)
+		t.Fatal("offline protobuf mirror changed", current, err)
 	}
 	status, err := edge.MirrorStatus(ctx)
 	if err != nil || status.Cursor != initial.Cursor || !status.Ready {
