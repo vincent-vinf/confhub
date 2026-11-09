@@ -64,6 +64,13 @@ test('边缘登录后只读查看镜像、beta、规则、客户端及同步状�
   await page.getByLabel('密码', { exact: true }).fill('ui-edge-password')
   await page.getByRole('button', { name: '登录控制台' }).click()
   await expect(page.getByRole('heading', { name: '配置管理', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '导入配置', exact: true })).toHaveCount(0)
+  const archive = await page.request.get(
+    `${edge}/api/admin/configs/export?namespace=public&group=DEFAULT_GROUP&name=${key.name}`,
+  )
+  expect(archive.ok()).toBeTruthy()
+  expect(archive.headers()['content-type']).toBe('application/zip')
+  expect((await archive.body()).subarray(0, 2).toString()).toBe('PK')
   await expect(page.getByText('边缘 · 只读', { exact: true })).toBeVisible()
   for (const name of ['新建配置', '命名空间', '用户管理', '操作审计', '账号设置']) {
     await expect(page.getByRole('link', { name, exact: true })).toHaveCount(0)

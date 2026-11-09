@@ -183,6 +183,20 @@ func (s *Store) Save(ctx context.Context, k config.Key, edit config.Edit) (confi
 		return config.Mutation{}, err
 	}
 	defer tx.Rollback()
+	mutation, err := s.saveInTransaction(ctx, tx, k, edit)
+	if err != nil || !mutation.Changed {
+		return mutation, err
+	}
+	mutation.Sequence, err = s.publish(ctx, tx, mutation.State, seq, false)
+	if err != nil {
+		return config.Mutation{}, err
+	}
+	return mutation, nil
+}
+
+// saveInTransaction shares ordinary publication rules with atomic imports.
+// Its caller validates input and owns event publication and transaction commit.
+func (s *Store) saveInTransaction(ctx context.Context, tx *gorm.DB, k config.Key, edit config.Edit) (config.Mutation, error) {
 	state, err := s.load(ctx, tx, k)
 	if errors.Is(err, config.ErrNotFound) {
 		if edit.ExpectedID != "" || edit.ExpectedRevision != 0 || edit.Target == "beta" {
@@ -215,8 +229,7 @@ func (s *Store) Save(ctx context.Context, k config.Key, edit config.Edit) (confi
 			if err = s.persistTargets(ctx, tx, state); err != nil {
 				return config.Mutation{}, err
 			}
-			seq, err = s.publish(ctx, tx, state, seq, false)
-			return config.Mutation{State: state, Changed: err == nil, Sequence: seq}, err
+			return config.Mutation{State: state, Changed: true}, nil
 		}
 		current := state.Versions[state.GlobalVersion]
 		if current.Content == edit.Content && current.Format == edit.Format {
@@ -235,8 +248,7 @@ func (s *Store) Save(ctx context.Context, k config.Key, edit config.Edit) (confi
 	if err = s.persistTargets(ctx, tx, state); err != nil {
 		return config.Mutation{}, err
 	}
-	seq, err = s.publish(ctx, tx, state, seq, false)
-	return config.Mutation{State: state, Changed: err == nil, Sequence: seq}, err
+	return config.Mutation{State: state, Changed: true}, nil
 }
 func (s *Store) persistTargets(ctx context.Context, tx *gorm.DB, state *config.State) error {
 	tx = tx.WithContext(ctx)

@@ -19,7 +19,7 @@ test: go-mod-download
 	go test $(SERVER_PACKAGES)
 
 test-unit:
-	go test -count=1 ./internal/config ./internal/settings ./internal/replication/...
+	go test -count=1 ./internal/config ./internal/configarchive ./internal/settings ./internal/replication/...
 	$(MAKE) sdk-unit
 
 sdk-unit:
@@ -106,3 +106,9 @@ docker-image-build-local:
 		-t $(DOCKER_IMAGE):$(IMAGE_TAG) .
 
 .PHONY: proto-generate go-mod-download test test-unit test-integration test-race vet build run clean docker-image-build-local frontend-install frontend-build frontend-test frontend-check frontend-e2e sdk-test sdk-check sdk-integration sdk-unit test-full test-system test-cloud-edge test-fuzz load-test
+
+# Disposable Nacos 2.5.1 and PostgreSQL; verifies both directions through real APIs.
+test-nacos-interop:
+	bash tests/nacos-interop.sh
+
+.PHONY: test-nacos-interop

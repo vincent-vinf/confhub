@@ -403,7 +403,7 @@ def main():
     parser.add_argument("--layers", default="unit,integration,system,frontend")
     parser.add_argument(
         "--scenarios",
-        default="business,protocol,concurrency,random,presence,users,audit,batch,faults",
+        default="business,protocol,concurrency,random,presence,users,audit,batch,archive,faults",
     )
     parser.add_argument("--writers", type=int, default=32)
     parser.add_argument("--clients", type=int, default=100)
@@ -512,6 +512,7 @@ def main():
                     "-count=1",
                     "-coverprofile=" + str(report / "unit.out"),
                     "./internal/config",
+                    "./internal/configarchive",
                     "./internal/settings",
                     "./internal/replication/...",
                 ],
@@ -549,6 +550,7 @@ def main():
                         "-coverprofile=" + str(report / "backend.out"),
                         "./cmd/...",
                         "./internal/config",
+                        "./internal/configarchive",
                         "./internal/settings",
                         "./internal/storage",
                         "./internal/server",
@@ -651,7 +653,7 @@ def main():
                         "-race",
                         ".",
                         "--scenarios",
-                        "business,protocol,users,audit,batch",
+                        "business,protocol,users,audit,batch,archive",
                         "--python",
                         args.python,
                         "--python-worker",

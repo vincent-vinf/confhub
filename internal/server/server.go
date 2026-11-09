@@ -71,6 +71,7 @@ func New(store *storage.Store, hub *syncer.Hub, options Options) (*Server, error
 	a.GET("/me", s.me)
 	a.GET("/clients", s.clients)
 	a.GET("/client-tags", s.clientTags)
+	a.GET("/configs/export", s.exportArchive)
 	if options.Edge {
 		s.edgeRoutes(a)
 		r.GET("/api/edge/status", s.edgeStatus)
@@ -79,6 +80,8 @@ func New(store *storage.Store, hub *syncer.Hub, options Options) (*Server, error
 		a.GET("/namespaces", s.namespaces)
 		s.userRoutes(a)
 		s.configRoutes(a)
+		a.POST("/configs/import/preview", func(c *gin.Context) { s.importArchive(c, true) })
+		a.POST("/configs/import", func(c *gin.Context) { s.importArchive(c, false) })
 		a.GET("/audits", s.audits)
 	}
 	if !options.Edge && options.ReplicationToken != "" {

@@ -2683,3 +2683,37 @@ textarea:disabled,
   margin: 0;
   overflow-wrap: anywhere;
 }
+
+.heading-actions,
+.archive-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.archive-table {
+  width: 100%;
+  table-layout: fixed;
+}
+.archive-table td,
+.archive-table th {
+  overflow-wrap: anywhere;
+}
+.form-field input[type='file'] {
+  max-width: 100%;
+  padding: 8px;
+}
+.form-field input[type='file']::file-selector-button {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 12px;
+  margin-right: 12px;
+  cursor: pointer;
+}
+.archive-item-error {
+  color: var(--error);
+  margin-top: 4px;
+}

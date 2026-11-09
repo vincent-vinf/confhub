@@ -1,4 +1,7 @@
 import type {
+  ImportPlan,
+  ImportPolicy,
+  ImportResult,
   EdgeStatus,
   AuditFilter,
   AuditPage,
@@ -41,13 +44,20 @@ const friendlyError = (status: number, serverMessage?: string) => {
   if (status >= 500) return '服务暂时不可用，请稍后重试。'
   return serverMessage || '操作失败，请检查填写的内容。'
 }
-export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+export async function request<T>(
+  path: string,
+  options: RequestInit = {},
+  responseType: 'json' | 'blob' = 'json',
+): Promise<T> {
   let response: Response
   try {
     response = await fetch(path, {
       ...options,
       credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json', ...options.headers },
+      headers: {
+        ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+        ...options.headers,
+      },
     })
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error
@@ -74,7 +84,7 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
     )
   }
   if (response.status === 204) return undefined as T
-  return response.json() as Promise<T>
+  return (responseType === 'blob' ? response.blob() : response.json()) as Promise<T>
 }
 const body = (method: string, value: unknown): RequestInit => ({
   method,
@@ -92,7 +102,34 @@ export const listUrl = (namespace = 'public', group = 'DEFAULT_GROUP') =>
   `/configs?${new URLSearchParams({ namespace, group })}`
 export const configQueryKey = (key: ConfigKey) =>
   ['config', key.namespace, key.group, key.name] as const
+function importForm(file: File, namespace: string, policy: ImportPolicy, plan?: ImportPlan) {
+  const form = new FormData()
+  form.set('file', file)
+  form.set('namespace', namespace)
+  form.set('policy', policy)
+  if (plan) {
+    form.set('plan', JSON.stringify(plan))
+    form.set('confirmed', 'true')
+  }
+  return form
+}
 export const api = {
+  exportArchive: (namespace: string, group: string, search = '', names: string[] = []) => {
+    const params = new URLSearchParams({ namespace, group, search })
+    names.forEach((name) => params.append('name', name))
+    return request<Blob>(`${base}/configs/export?${params}`, {}, 'blob')
+  },
+  previewImport: (file: File, namespace: string, policy: ImportPolicy, signal?: AbortSignal) =>
+    request<ImportPlan>(`${base}/configs/import/preview`, {
+      method: 'POST',
+      body: importForm(file, namespace, policy),
+      signal,
+    }),
+  importArchive: (file: File, plan: ImportPlan) =>
+    request<ImportResult>(`${base}/configs/import`, {
+      method: 'POST',
+      body: importForm(file, plan.namespace, plan.policy, plan),
+    }),
   edgeStatus: (signal?: AbortSignal) => request<EdgeStatus>(`${base}/edge/status`, { signal }),
   audits: (filter: AuditFilter, before = '', signal?: AbortSignal) =>
     request<AuditPage>(

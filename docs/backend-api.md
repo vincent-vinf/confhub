@@ -61,6 +61,18 @@ target 省略或为 `global` 时全量保存，`beta` 时覆盖唯一 beta；不
 - 目标与来源相同返回 400；目标已有同名配置返回 409，不覆盖、不合并；不存在的来源或目标分组返回 404。删除会清除配置及全部历史、beta 和灰度规则。
 - 控制台支持当前页多选与全选，选中后在列表上方出现批量操作栏；切换筛选条件、页码或刷新时清空选择。移动弹窗联动选择目标命名空间和分组，删除要求二次确认。
 
+## Nacos ZIP 导入导出
+
+仅支持新版 `group/dataId` + `.metadata.yml` ZIP。只交换当前全量正文、格式和描述，名称与正文原样保留；不交换历史、beta 或规则。完整约束见 [功能规格](nacos-import-export-spec.md)。
+
+- `GET /api/admin/configs/export?namespace=public&group=DEFAULT_GROUP&search=app`：读取当前分组中名称包含 search 的所有分页（不区分大小写、按字面匹配）。重复 `name=app.yaml&name=other` 可导出选中项；选中项已不存在则失败。返回 `application/zip`，附件名为 `nacos_config_export_时间.zip`。要求目标分组 `config.read`；只读与 edge 实例也可导出。
+- `POST /api/admin/configs/import/preview`：multipart 字段 `file`、`namespace` 和 `policy`（`ABORT` 默认 / `SKIP` / `OVERWRITE`）。目标 namespace 必须存在，所有包内 group 都要求 `config.write`；仅系统管理员能自动创建缺失分组。返回 `{namespace,policy,digest,entries:[{group,name,expected_id,expected_revision,action,error?}],missing_groups:[],can_import}`。action 为 create/conflict/skip/overwrite/unchanged/error；无正文。同名冲突、逐项格式错误或无权自动创建的缺失分组，预览仍返回全部条目的处理结果，can_import 为 false；error 提供逐项原因。包内任一目标没有写权限则整次预览返回 403，不查询无权限配置状态。
+- `POST /api/admin/configs/import`：同一个 multipart ZIP，附上 `plan`（完整预览结果的 JSON 字符串）和 `confirmed=true`。重新解析文件、核对指纹与目标、重新授权，然后在一个事务内保存版本、组织及事件；成功后通知客户端。可跨实例提交，无服务端草稿状态。
+- 成功返回 `{created,updated,skipped,unchanged,sequence}`。正文和格式均不变时不产生新版本，description 也不更新；覆盖保留 beta/规则。全部跳过或不变不产生事件。待写项的身份/修订变化或新名称被抢占返回 409，整包未提交，必须重新预览；普通保存的并发保护同样适用。
+- 提交格式错误、ZIP 结构或大小不合法返回 400；无权限/只读导入返回 403；不存在的目标返回 404。所有导入策略都不会因校验、权限、并发或写入失败而部分提交。
+- 上限：1,000 项、每份正文 1 MiB、解压总量（含 metadata）64 MiB、ZIP 8 MiB；上传请求仍受全局 8 MiB 限制，因此 multipart 开销会减少实际 ZIP 可用大小。超过限制整体失败，不截断。
+- 审计动作 `config.export`、`config.import.preview`、`config.import`，只记录操作范围与统计，不记录正文或 ZIP；只读模式仍不写审计。
+
 ## 历史、回退与灰度
 
 | 方法 | 路径 | 正文 / 参数 |

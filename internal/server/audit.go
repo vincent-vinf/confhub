@@ -51,6 +51,12 @@ func auditAction(method, path string) string {
 		return "config.version.read"
 	case "POST " + base + "/simulate":
 		return "config.simulate"
+	case "GET /api/admin/configs/export":
+		return "config.export"
+	case "POST /api/admin/configs/import/preview":
+		return "config.import.preview"
+	case "POST /api/admin/configs/import":
+		return "config.import"
 	case "POST /api/admin/configs/batch-delete":
 		return "config.batch-delete"
 	case "POST /api/admin/configs/batch-move":

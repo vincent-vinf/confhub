@@ -36,7 +36,7 @@ func (s *Server) authorize(c *gin.Context) {
 	case "/api/admin/users", "/api/admin/users/:id", "/api/admin/users/:id/password":
 		s.require(c, "users.manage", "", "")
 		return
-	case "/api/admin/configs/batch-delete", "/api/admin/configs/batch-move":
+	case "/api/admin/configs/export", "/api/admin/configs/import/preview", "/api/admin/configs/import", "/api/admin/configs/batch-delete", "/api/admin/configs/batch-move":
 		return // Body targets checked together before mutation.
 	case "/api/admin/namespaces", "/api/admin/namespaces/:namespace/groups":
 		if c.Request.Method == "GET" {

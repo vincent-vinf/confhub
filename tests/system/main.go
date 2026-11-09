@@ -405,7 +405,7 @@ func run() (exitCode int) {
 	r := &runner{}
 	var addresses, scenes string
 	flag.StringVar(&addresses, "addresses", os.Getenv("CONFHUB_SYSTEM_ADDRESSES"), "comma-separated running instance URLs (at least two)")
-	flag.StringVar(&scenes, "scenarios", "business,protocol,concurrency,random,presence,users,audit,batch", "comma-separated suite names; faults requires isolated controller")
+	flag.StringVar(&scenes, "scenarios", "business,protocol,concurrency,random,presence,users,audit,batch,archive", "comma-separated suite names; faults requires isolated controller")
 	flag.IntVar(&r.writers, "writers", 32, "concurrent editors")
 	flag.IntVar(&r.clients, "clients", 100, "subscribing clients")
 	flag.IntVar(&r.configs, "configs", 10, "distinct configurations (positive number)")
@@ -435,7 +435,7 @@ func run() (exitCode int) {
 	r.controlToken = os.Getenv("CONFHUB_SYSTEM_CONTROL_TOKEN")
 	selected := strings.Split(scenes, ",")
 	for _, name := range selected {
-		if name != "business" && name != "protocol" && name != "concurrency" && name != "random" && name != "presence" && name != "faults" && name != "users" && name != "audit" && name != "batch" {
+		if name != "business" && name != "protocol" && name != "concurrency" && name != "random" && name != "presence" && name != "faults" && name != "users" && name != "audit" && name != "batch" && name != "archive" {
 			fmt.Fprintln(os.Stderr, "unknown scenario", name)
 			return 2
 		}
@@ -500,6 +500,8 @@ func run() (exitCode int) {
 					r.audit()
 				case "batch":
 					r.batch()
+				case "archive":
+					r.archive()
 				case "faults":
 					r.faults()
 				}

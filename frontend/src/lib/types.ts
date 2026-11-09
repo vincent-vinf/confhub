@@ -141,3 +141,27 @@ export type EdgeStatus = {
     error?: string
   }
 }
+
+export type ImportPolicy = 'ABORT' | 'SKIP' | 'OVERWRITE'
+export interface ImportPlan {
+  namespace: string
+  policy: ImportPolicy
+  digest: string
+  entries: {
+    group: string
+    name: string
+    expected_id: string
+    expected_revision: number
+    action: 'create' | 'conflict' | 'skip' | 'overwrite' | 'unchanged' | 'error'
+    error?: string
+  }[]
+  missing_groups: string[]
+  can_import: boolean
+}
+export interface ImportResult {
+  created: number
+  updated: number
+  skipped: number
+  unchanged: number
+  sequence: number
+}

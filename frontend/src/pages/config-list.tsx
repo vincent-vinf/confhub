@@ -7,6 +7,8 @@ import {
   ChevronLeft,
   ChevronRight,
   FileCode2,
+  Download,
+  Upload,
   FolderInput,
   Plus,
   RefreshCw,
@@ -16,14 +18,22 @@ import {
 } from 'lucide-react'
 import { api, configUrl, groupIndex } from '../lib/api'
 import { Badge, Button, Empty, ErrorNotice, Loading } from '../components/ui'
+import { ImportConfigDialog } from '../components/import-config-dialog'
 import { BatchConfigDialog } from '../components/batch-config-dialog'
-import { usePermission } from '../components/providers'
+import { usePending, useToast, usePermission } from '../components/providers'
 import type { ConfigSummary } from '../lib/types'
 
 export function ConfigListPage() {
   const [params, setParams] = useSearchParams()
   const namespace = params.get('namespace') ?? 'public',
     group = params.get('group') ?? 'DEFAULT_GROUP'
+  const readable = usePermission('config.read', namespace, group)
+  const importable = usePermission('config.write', namespace)
+  const [importOpen, setImportOpen] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState<unknown>()
+  const toast = useToast()
+  usePending('正在导出配置', exporting)
   const writable = usePermission('config.write', namespace, group)
   const manage = usePermission('organization.manage')
   const [search, setSearch] = useState('')
@@ -104,25 +114,54 @@ export function ConfigListPage() {
   function changeNamespace(value: string) {
     setParams({ namespace: value })
   }
+  async function exportConfigs(names: string[] = []) {
+    if (exporting) return
+    setExporting(true)
+    setExportError(undefined)
+    try {
+      const blob = await api.exportArchive(namespace, group, names.length ? '' : searchQuery, names)
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `nacos_config_export_${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)}.zip`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+      toast('配置已导出。')
+    } catch (e) {
+      setExportError(e)
+    } finally {
+      setExporting(false)
+    }
+  }
   return (
     <>
       <div className="page-heading">
         <div>
           <h1>配置管理</h1>
         </div>
-        {writable && (
-          <Link
-            className="button primary"
-            to={`/new?${new URLSearchParams({ namespace, group })}`}
-            aria-disabled={!!scopeError}
-            onClick={(event) => {
-              if (scopeError) event.preventDefault()
-            }}
-          >
-            <Plus size={18} aria-hidden="true" />
-            新建配置
-          </Link>
-        )}
+        <div className="heading-actions">
+          {importable && (
+            <Button onClick={() => setImportOpen(true)}>
+              <Upload size={18} aria-hidden="true" />
+              导入配置
+            </Button>
+          )}
+          {writable && (
+            <Link
+              className="button primary"
+              to={`/new?${new URLSearchParams({ namespace, group })}`}
+              aria-disabled={!!scopeError}
+              onClick={(event) => {
+                if (scopeError) event.preventDefault()
+              }}
+            >
+              <Plus size={18} aria-hidden="true" />
+              新建配置
+            </Link>
+          )}
+        </div>
       </div>
       <div className="scope-bar">
         <label>
@@ -167,6 +206,17 @@ export function ConfigListPage() {
             </Badge>
           </div>
           <div className="list-tools">
+            {readable && (
+              <Button
+                title="导出当前命名空间、分组与搜索条件下的全部分页"
+                disabled={!!scopeError || !rows?.length}
+                busy={exporting}
+                onClick={() => exportConfigs()}
+              >
+                <Download size={16} aria-hidden="true" />
+                导出全部
+              </Button>
+            )}
             <div className="search-field">
               <Search size={17} aria-hidden="true" />
               <input
@@ -199,20 +249,31 @@ export function ConfigListPage() {
             </Button>
           </div>
         </div>
-        {writable && selected.length > 0 && (
+        {readable && selected.length > 0 && (
           <div className="batch-toolbar" role="group" aria-label="批量配置操作">
             <span role="status" aria-live="polite" aria-atomic="true">
               已选择 <strong>{selected.length}</strong> 项
             </span>
             <div className="batch-actions">
-              <Button onClick={() => setBatchAction('move')}>
-                <FolderInput size={16} aria-hidden="true" />
-                移动配置
+              <Button
+                busy={exporting}
+                onClick={() => exportConfigs(selected.map((c) => c.key.name))}
+              >
+                <Download size={16} aria-hidden="true" />
+                导出选中
               </Button>
-              <Button variant="danger" onClick={() => setBatchAction('delete')}>
-                <Trash2 size={16} aria-hidden="true" />
-                删除配置
-              </Button>
+              {writable && (
+                <>
+                  <Button onClick={() => setBatchAction('move')}>
+                    <FolderInput size={16} aria-hidden="true" />
+                    移动配置
+                  </Button>
+                  <Button variant="danger" onClick={() => setBatchAction('delete')}>
+                    <Trash2 size={16} aria-hidden="true" />
+                    删除配置
+                  </Button>
+                </>
+              )}
               <Button variant="ghost" onClick={() => setSelected([])}>
                 取消选择
               </Button>
@@ -220,7 +281,7 @@ export function ConfigListPage() {
           </div>
         )}
         <ErrorNotice
-          error={scopeError || namespaces.error || groups.error || query.error}
+          error={exportError || scopeError || namespaces.error || groups.error || query.error}
           onRetry={scopeError ? undefined : () => query.refetch()}
         />
         {!scopeError && query.isPending ? (
@@ -233,7 +294,7 @@ export function ConfigListPage() {
               <table className="config-table">
                 <thead>
                   <tr>
-                    {writable && (
+                    {readable && (
                       <th className="selection-cell" scope="col">
                         <label className="selection-toggle">
                           <input
@@ -268,7 +329,7 @@ export function ConfigListPage() {
                       key={config.id}
                       data-selected={selected.some((item) => item.id === config.id) || undefined}
                     >
-                      {writable && (
+                      {readable && (
                         <td className="selection-cell">
                           <label className="selection-toggle">
                             <input
@@ -359,6 +420,18 @@ export function ConfigListPage() {
           </div>
         </div>
       </section>
+      {importOpen && (
+        <ImportConfigDialog
+          initialNamespace={namespace}
+          onClose={() => setImportOpen(false)}
+          onSuccess={() => {
+            setImportOpen(false)
+            setSelected([])
+            setCursors([''])
+            setSearchPage(0)
+          }}
+        />
+      )}
       {writable && batchAction && selected.length > 0 && (
         <BatchConfigDialog
           action={batchAction}

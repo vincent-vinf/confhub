@@ -49,9 +49,9 @@ python3 tests/run.py --report-dir test-results/acceptance --coverage-gates
 
 同步模块的真实 PostgreSQL/NATS 测试随集成层执行。完整云边部署和故障注入使用独立入口 `make test-cloud-edge`，范围与结果见 [云边测试记录](cloud-edge-testing.md)。
 
-默认执行 `unit,integration,system,frontend` 四层，系统套件执行 `business,protocol,concurrency,random,presence,users,audit,batch,faults`。默认并发为 32 写入者、100 订阅客户端、10 配置、10 轮，随机种子为 20261010。这是正确性回归，不是容量压测。
+默认执行 `unit,integration,system,frontend` 四层，系统套件执行 `business,protocol,concurrency,random,presence,users,audit,batch,archive,faults`。默认并发为 32 写入者、100 订阅客户端、10 配置、10 轮，随机种子为 20261010。这是正确性回归，不是容量压测。
 
-系统层之后还执行一次连接模式的 `business,protocol,users,audit,batch` 回归：仅传入实例地址和凭据，移除故障控制器环境变量，以验证同一 Go 程序可直接测试运行中的系统。该报告单独放在 `connected-system/`，沿用传入的并发规模、轮次、种子和超时。
+系统层之后还执行一次连接模式的 `business,protocol,users,audit,batch,archive` 回归：仅传入实例地址和凭据，移除故障控制器环境变量，以验证同一 Go 程序可直接测试运行中的系统。该报告单独放在 `connected-system/`，沿用传入的并发规模、轮次、种子和超时。
 
 针对性运行：
 
@@ -265,3 +265,9 @@ python3 tests/run.py --layers integration,system --coverage-gates
 会话测试固定重放最初 JWT，覆盖改密响应清除 Cookie 后的服务端撤销，并将同一会话用于不同实例地址。审计脱敏直接检查原始 JSON，避免测试模型忽略未知字段而漏检。
 
 本次验收范围为后端、两个 SDK 及黑盒程序。临时账号、namespace、配置、服务进程与 PostgreSQL 容器均清理完成；已有 Compose 服务保持运行。
+
+## Nacos 文件互通
+
+`make test-nacos-interop` 启动临时 Nacos 2.5.1（独立 Derby、关闭认证、仅回环地址）和 PostgreSQL 17，通过真实 Nacos 导出/导入 API 与 ConfHub 管理 API 验证双向互通，退出后删除本次容器。需要 Docker、curl、openssl；不需要部署数据库凭据。使用虚构配置，逐项核对名称、分组、正文、格式、描述和 CRLF。Nacos 发布 API 只支持六种共有格式，`ini` 会被改为 text，因此 INI 另从 ConfHub 导出后验证 Nacos ZIP 导入，不能把它当成 Nacos 发布接口的能力。
+
+归档单测纳入 test-unit；PostgreSQL 的事务、规则保留、并发抢占与删除重建，以及 HTTP 权限/审计/只读验证纳入集成层。系统套件 `archive` 使用 Go/Python 正式 SDK，验证跨实例导入后的全量/灰度 GET 与通知、失败重试、三种策略及筛选导出。前端 archive.spec.ts 覆盖下载、上传、冲突重预览及明暗窄屏无障碍；原读取用户、只读和 edge 回归同时验证导出能力。
