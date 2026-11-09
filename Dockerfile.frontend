@@ -1,0 +1,14 @@
+# Frontend-only patch: preserve the deployed backend and its migration version.
+# Set BASE_IMAGE to the deployed ConfHub image's immutable repository digest.
+ARG BASE_IMAGE
+FROM registry.cn-hangzhou.aliyuncs.com/bodesi/node:24.12 AS frontend-builder
+WORKDIR /frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci --registry=https://registry.npmmirror.com
+COPY frontend/index.html frontend/tsconfig.json frontend/vite.config.ts ./
+COPY frontend/public ./public
+COPY frontend/src ./src
+RUN npm run build
+
+FROM ${BASE_IMAGE}
+COPY --from=frontend-builder --chown=confhub:confhub /frontend/dist /app/frontend

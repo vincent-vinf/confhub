@@ -20,10 +20,11 @@ import { api, configUrl, groupIndex } from '../lib/api'
 import { Badge, Button, Empty, ErrorNotice, Loading } from '../components/ui'
 import { ImportConfigDialog } from '../components/import-config-dialog'
 import { BatchConfigDialog } from '../components/batch-config-dialog'
-import { usePending, useToast, usePermission } from '../components/providers'
+import { useAuth, usePending, useToast, usePermission } from '../components/providers'
 import type { ConfigSummary } from '../lib/types'
 
 export function ConfigListPage() {
+  const { user } = useAuth()
   const [params, setParams] = useSearchParams()
   const namespace = params.get('namespace') ?? 'public',
     group = params.get('group') ?? 'DEFAULT_GROUP'
@@ -88,8 +89,13 @@ export function ConfigListPage() {
   useEffect(() => {
     setSelected([])
   }, [namespace, group, searchQuery, searchPage, pageNumber, writable])
-  const scopeError =
-    namespaces.data && !namespaces.data.includes(namespace)
+  const emptyMirror =
+    user?.role === 'edge' &&
+    ((namespaces.isSuccess && namespaces.data.length === 0) ||
+      (namespaces.data?.includes(namespace) && groups.isSuccess && groups.data.length === 0))
+  const scopeError = emptyMirror
+    ? undefined
+    : namespaces.data && !namespaces.data.includes(namespace)
       ? '此命名空间不可访问，请选择有权限的命名空间。'
       : groups.data && !groups.data.includes(group)
         ? '此分组不可访问，请选择有权限的分组。'
@@ -113,6 +119,14 @@ export function ConfigListPage() {
   }, [groups.data, namespace, params, setParams])
   function changeNamespace(value: string) {
     setParams({ namespace: value })
+  }
+  async function refresh() {
+    setSelected([])
+    const refreshedNamespaces = await namespaces.refetch()
+    if (refreshedNamespaces.isError || !refreshedNamespaces.data?.includes(namespace)) return
+    const refreshedGroups = await groups.refetch()
+    if (refreshedGroups.isError || !refreshedGroups.data?.includes(group)) return
+    await query.refetch()
   }
   async function exportConfigs(names: string[] = []) {
     if (exporting) return
@@ -239,11 +253,8 @@ export function ConfigListPage() {
               variant="ghost"
               className="icon-button"
               aria-label="刷新配置列表"
-              busy={query.isFetching}
-              onClick={() => {
-                setSelected([])
-                query.refetch()
-              }}
+              busy={namespaces.isFetching || groups.isFetching || query.isFetching}
+              onClick={refresh}
             >
               <RefreshCw size={17} aria-hidden="true" />
             </Button>
@@ -282,9 +293,11 @@ export function ConfigListPage() {
         )}
         <ErrorNotice
           error={exportError || scopeError || namespaces.error || groups.error || query.error}
-          onRetry={scopeError ? undefined : () => query.refetch()}
+          onRetry={scopeError ? undefined : refresh}
         />
-        {!scopeError && query.isPending ? (
+        {emptyMirror ? (
+          <Empty title="暂无已同步配置" />
+        ) : !scopeError && query.isPending ? (
           <Loading label={searchQuery ? '正在搜索本分组…' : '正在读取配置…'} />
         ) : (
           !scopeError &&
