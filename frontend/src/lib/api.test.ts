@@ -113,3 +113,38 @@ it('权限不足与同源校验失败分别提示，权限不足不触发重新�
   await expect(api.namespaces()).rejects.toThrow('请求来源校验失败')
   window.removeEventListener('confhub:unauthorized', expired)
 })
+
+it('在线客户端筛选编码特殊字符，保留标签值空格并省略未填写的值', async () => {
+  const fetch = vi.fn().mockImplementation(() => Promise.resolve(new Response('{"clients":[]}')))
+  vi.stubGlobal('fetch', fetch)
+  const filter = {
+    search: '::1 + 中文',
+    namespace: 'public',
+    group: 'g',
+    name: 'a?.yaml',
+    status: 'beta',
+    tag: 'env',
+    tag_value: '%_ ',
+  }
+  await api.clients(filter, 'cursor')
+  let params = new URL(String(fetch.mock.calls[0][0]), 'http://localhost').searchParams
+  for (const [key, value] of Object.entries(filter)) expect(params.get(key)).toBe(value)
+  expect(params.get('after')).toBe('cursor')
+  expect(params.get('limit')).toBe('25')
+  await api.clients({ ...filter, tag_value: '' })
+  params = new URL(String(fetch.mock.calls[1][0]), 'http://localhost').searchParams
+  expect(params.has('tag_value')).toBe(false)
+})
+
+it('边缘旧接口返回空规则 null 时，详情读取规范化为空列表且保留内容', async () => {
+  const key = { namespace: 'public', group: 'DEFAULT_GROUP', name: 'plain.yaml' }
+  const state = {
+    id: 'plain',
+    key,
+    global_version: 1,
+    rules: null,
+    versions: { 1: { number: 1, content: 'key: value\n', format: 'yaml' } },
+  }
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(state))))
+  expect(await api.state(key)).toEqual({ ...state, rules: [] })
+})

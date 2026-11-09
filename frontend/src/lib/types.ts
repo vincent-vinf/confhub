@@ -81,6 +81,15 @@ export type OnlineClient = {
   tags: Record<string, string>
   subscriptions: ClientSubscription[]
 }
+export type ClientFilter = {
+  search: string
+  namespace: string
+  group: string
+  name: string
+  status: string
+  tag: string
+  tag_value: string
+}
 export type ClientPage = { clients: OnlineClient[]; next_after?: string }
 
 export type Grant = { namespace: string; group: string; access: 'read' | 'write' }

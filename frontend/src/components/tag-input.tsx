@@ -10,12 +10,14 @@ export function TagInput({
   onChange,
   tag,
   placeholder,
+  disabled = false,
 }: {
   label: string
   value: string
   onChange: (value: string) => void
   tag?: string
   placeholder?: string
+  disabled?: boolean
 }) {
   const canReadClients = usePermission('clients.read')
   const isName = tag === undefined
@@ -31,7 +33,7 @@ export function TagInput({
   const query = useQuery({
     queryKey: ['client-tags', tag, prefix],
     queryFn: ({ signal }) => api.clientTags(tag, prefix, signal),
-    enabled: canReadClients && open && (isName || !!tag),
+    enabled: !disabled && canReadClients && open && (isName || !!tag),
     // Keep matching suggestions usable while the debounced prefix request runs.
     // Values from a different tag must never carry over to this field.
     placeholderData: (previous, previousQuery) =>
@@ -68,6 +70,7 @@ export function TagInput({
   return (
     <div className="tag-autocomplete">
       <input
+        disabled={disabled}
         role="combobox"
         aria-label={label}
         aria-autocomplete="list"

@@ -121,7 +121,8 @@ func stateFromProto(m *wire.State) (*config.State, error) {
 		return nil, nil
 	}
 	s := &config.State{Sequence: m.Sequence, ID: m.Id, Key: keyFromProto(m.Key), Revision: m.Revision,
-		LastVersion: m.LastVersion, GlobalVersion: m.GlobalVersion, Versions: map[int64]config.Version{}}
+		LastVersion: m.LastVersion, GlobalVersion: m.GlobalVersion, Versions: map[int64]config.Version{},
+		Rules: make([]config.Rule, 0, len(m.Rules))}
 	for n, v := range m.Versions {
 		if v == nil {
 			return nil, errors.New("missing replication version")

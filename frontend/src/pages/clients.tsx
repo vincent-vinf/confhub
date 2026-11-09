@@ -1,21 +1,53 @@
-import { useState } from 'react'
+import { useState, type FormEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { ChevronLeft, ChevronRight, Monitor, RefreshCw } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Monitor, RefreshCw, Search } from 'lucide-react'
 import { api, configUrl } from '../lib/api'
+import type { ClientFilter } from '../lib/types'
+import { Select } from '../components/select'
+import { TagInput } from '../components/tag-input'
 import { formatDate } from '../lib/config'
 import { Badge, Button, Empty, ErrorNotice, Loading } from '../components/ui'
 
+const empty: ClientFilter = {
+  search: '',
+  namespace: '',
+  group: '',
+  name: '',
+  status: '',
+  tag: '',
+  tag_value: '',
+}
+
 export function ClientsPage() {
+  const [draft, setDraft] = useState<ClientFilter>(empty)
+  const [filter, setFilter] = useState<ClientFilter>(empty)
   const [cursors, setCursors] = useState([''])
   const after = cursors[cursors.length - 1]
   const query = useQuery({
-    queryKey: ['clients', after],
-    queryFn: ({ signal }) => api.clients(after, signal),
+    queryKey: ['clients', filter, after],
+    queryFn: ({ signal }) => api.clients(filter, after, signal),
     staleTime: 0,
     refetchInterval: 5000,
     refetchOnWindowFocus: true,
   })
+  function submit(event: FormEvent) {
+    event.preventDefault()
+    const next = {
+      ...draft,
+      search: draft.search.trim(),
+      namespace: draft.namespace.trim(),
+      group: draft.group.trim(),
+      name: draft.name.trim(),
+      tag_value: draft.tag ? draft.tag_value : '',
+    }
+    if (cursors.length === 1 && JSON.stringify(next) === JSON.stringify(filter)) {
+      void query.refetch()
+    }
+    setFilter(next)
+    setCursors([''])
+  }
+  const filtered = Object.values(filter).some(Boolean)
   return (
     <>
       <div className="page-heading">
@@ -27,6 +59,97 @@ export function ClientsPage() {
           刷新
         </Button>
       </div>
+      <section className="panel">
+        <form className="client-filters" onSubmit={submit} aria-label="筛选在线客户端">
+          <label>
+            客户端搜索
+            <input
+              maxLength={512}
+              placeholder="主机名、IP、连接或实例 ID"
+              value={draft.search}
+              onChange={(e) => setDraft({ ...draft, search: e.target.value })}
+            />
+          </label>
+          <label>
+            Namespace
+            <input
+              maxLength={255}
+              placeholder="全部 namespace"
+              value={draft.namespace}
+              onChange={(e) => setDraft({ ...draft, namespace: e.target.value })}
+            />
+          </label>
+          <label>
+            Group
+            <input
+              maxLength={255}
+              placeholder="全部分组"
+              value={draft.group}
+              onChange={(e) => setDraft({ ...draft, group: e.target.value })}
+            />
+          </label>
+          <label>
+            配置名称
+            <input
+              maxLength={255}
+              placeholder="配置名称关键字"
+              value={draft.name}
+              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+            />
+          </label>
+          <label>
+            版本状态
+            <Select
+              aria-label="筛选版本状态"
+              value={draft.status}
+              onValueChange={(status) => setDraft({ ...draft, status })}
+            >
+              <option value="">全部状态</option>
+              <option value="main">全量</option>
+              <option value="beta">beta</option>
+              <option value="waiting">等待发送</option>
+              <option value="deleted">配置已删除或不存在</option>
+              <option value="unsubscribed">暂无订阅</option>
+            </Select>
+          </label>
+          <label>
+            标签名称
+            <TagInput
+              label="筛选标签名称"
+              value={draft.tag}
+              placeholder="全部标签"
+              onChange={(tag) => setDraft({ ...draft, tag, tag_value: '' })}
+            />
+          </label>
+          <label>
+            标签值
+            <TagInput
+              key={draft.tag}
+              disabled={!draft.tag}
+              label="筛选标签值"
+              tag={draft.tag}
+              value={draft.tag_value}
+              placeholder="留空匹配任意值"
+              onChange={(tag_value) => setDraft({ ...draft, tag_value })}
+            />
+          </label>
+          <div className="button-row">
+            <Button type="submit" variant="primary" busy={query.isFetching}>
+              <Search size={16} aria-hidden="true" />
+              查询
+            </Button>
+            <Button
+              onClick={() => {
+                setDraft(empty)
+                setFilter(empty)
+                setCursors([''])
+              }}
+            >
+              重置筛选
+            </Button>
+          </div>
+        </form>
+      </section>
       <ErrorNotice error={query.error} onRetry={() => query.refetch()} />
       <section className="panel">
         <div className="panel-toolbar">
@@ -118,7 +241,13 @@ export function ClientsPage() {
           </div>
         ) : !query.error ? (
           <Empty
-            title={after ? '这一页已无在线连接' : '暂无在线客户端'}
+            title={
+              after
+                ? '这一页已无在线连接'
+                : filtered
+                  ? '没有符合条件的在线客户端'
+                  : '暂无在线客户端'
+            }
             action={
               after ? <Button onClick={() => setCursors([''])}>返回第一页</Button> : undefined
             }
@@ -129,7 +258,7 @@ export function ClientsPage() {
           <div className="pagination">
             <Button
               aria-label="上一页客户端"
-              disabled={cursors.length === 1 || query.isPending}
+              disabled={cursors.length === 1 || query.isFetching}
               onClick={() => setCursors((items) => items.slice(0, -1))}
             >
               <ChevronLeft size={16} aria-hidden="true" />
@@ -137,7 +266,7 @@ export function ClientsPage() {
             </Button>
             <Button
               aria-label="下一页客户端"
-              disabled={!query.data?.next_after || query.isPending}
+              disabled={!query.data?.next_after || query.isFetching}
               onClick={() => setCursors((items) => [...items, query.data!.next_after!])}
             >
               下一页

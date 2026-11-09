@@ -144,37 +144,66 @@ func (s *Store) RemovePresence(ctx context.Context, instance string) error {
 	return s.db.WithContext(ctx).Where(map[string]any{"id": instance}).Delete(&instanceRow{}).Error
 }
 
-func (s *Store) Clients(ctx context.Context, after string, limit int) (clientinfo.Page, error) {
+func (s *Store) Clients(ctx context.Context, after string, limit int, filter clientinfo.Filter) (clientinfo.Page, error) {
 	page := clientinfo.Page{Clients: []clientinfo.Client{}}
 	if limit < 1 || limit > 100 || len(after) > 36 {
 		return page, fmt.Errorf("%w: invalid client page", config.ErrInvalid)
+	}
+	if err := filter.Validate(); err != nil {
+		return page, err
 	}
 	db := s.db.WithContext(ctx)
 	now, err := s.databaseTime(db)
 	if err != nil {
 		return page, err
 	}
-	var rows []struct {
-		SnapshotJSON string `gorm:"column:snapshot_json"`
-		RefreshedAt  int64
-	}
-	err = db.Table("connected_clients AS c").Select("c.snapshot_json", "i.refreshed_at").Clauses(clause.From{
+	query := db.Table("connected_clients AS c").Select("c.id", "c.snapshot_json", "i.refreshed_at").Clauses(clause.From{
 		Tables: []clause.Table{{Name: "connected_clients", Alias: "c"}},
 		Joins: []clause.Join{{Type: clause.InnerJoin, Table: clause.Table{Name: "client_instances", Alias: "i"},
 			ON: clause.Where{Exprs: []clause.Expression{clause.Eq{Column: column("i", "id"), Value: column("c", "instance_id")}}}}},
-	}).Where(clause.Gt{Column: column("i", "expires_at"), Value: now}).
-		Where(clause.Gt{Column: column("c", "id"), Value: after}).
-		Order(clause.OrderByColumn{Column: column("c", "id")}).Limit(limit + 1).Scan(&rows).Error
-	if err != nil {
-		return page, err
+	}).Where(clause.Gt{Column: column("i", "expires_at"), Value: now})
+	if filter.Tag != "" {
+		tags := db.Model(&tagRow{}).Select("client_id").Where(clause.Eq{Column: clause.Column{Name: "name"}, Value: []byte(filter.Tag)})
+		if filter.TagValue != nil {
+			tags = tags.Where(clause.Eq{Column: clause.Column{Name: "value"}, Value: []byte(*filter.TagValue)})
+		}
+		query = query.Where("c.id IN (?)", tags)
 	}
-	for _, row := range rows {
-		var c clientinfo.Client
-		if err = json.Unmarshal([]byte(row.SnapshotJSON), &c); err != nil {
+	// Scan bounded batches until a complete matching page (plus lookahead) is
+	// found. Filtering decoded snapshots keeps JSON semantics identical across
+	// PostgreSQL/MySQL without adding subscription tables or dialect-specific SQL.
+	for len(page.Clients) <= limit {
+		var rows []struct {
+			ID           string
+			SnapshotJSON string
+			RefreshedAt  int64
+		}
+		batchSize := 128
+		if filter == (clientinfo.Filter{}) {
+			batchSize = limit + 1
+		}
+		err = query.WithContext(ctx).Where(clause.Gt{Column: column("c", "id"), Value: after}).
+			Order(clause.OrderByColumn{Column: column("c", "id")}).Limit(batchSize).Scan(&rows).Error
+		if err != nil {
 			return page, err
 		}
-		c.RefreshedAt = time.UnixMicro(row.RefreshedAt).UTC()
-		page.Clients = append(page.Clients, c)
+		for _, row := range rows {
+			after = row.ID
+			var c clientinfo.Client
+			if err = json.Unmarshal([]byte(row.SnapshotJSON), &c); err != nil {
+				return page, err
+			}
+			if filter.Matches(c) {
+				c.RefreshedAt = time.UnixMicro(row.RefreshedAt).UTC()
+				page.Clients = append(page.Clients, c)
+				if len(page.Clients) > limit {
+					break
+				}
+			}
+		}
+		if len(rows) < batchSize {
+			break
+		}
 	}
 	if len(page.Clients) > limit {
 		page.Clients = page.Clients[:limit]

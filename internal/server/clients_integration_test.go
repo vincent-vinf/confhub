@@ -124,6 +124,30 @@ func TestClientsAreReadOnlyAuthenticatedAndVisibleAcrossReplicas(t *testing.T) {
 	if c.Tags["env"] != "gray" || c.InstanceID == "" || c.SourceAddress == "" || c.ConnectedAt.IsZero() || c.RefreshedAt.IsZero() || c.Subscriptions[0].Version != 1 {
 		t.Fatalf("metadata: %+v", c)
 	}
+
+	for _, tc := range []struct {
+		query string
+		count int
+	}{
+		{"search=NODE-test&namespace=public&group=DEFAULT_GROUP&name=presence&status=main&tag=env&tag_value=gray", 1},
+		{"status=beta", 0}, {"namespace=private", 0}, {"tag=env&tag_value=Gray", 0}, {"tag=sys.ip", 1},
+		{"tag=env&tag_value=", 0}, {"status=unsubscribed", 0},
+	} {
+		res = get("/api/admin/clients?"+tc.query, true)
+		var filtered clientinfo.Page
+		err = json.NewDecoder(res.Body).Decode(&filtered)
+		res.Body.Close()
+		if err != nil || res.StatusCode != 200 || len(filtered.Clients) != tc.count {
+			t.Fatalf("filter %s: %d %+v %v", tc.query, res.StatusCode, filtered, err)
+		}
+	}
+	for _, query := range []string{"status=invalid", "tag_value=orphan", "limit=0", "limit=abc"} {
+		res = get("/api/admin/clients?"+query, true)
+		res.Body.Close()
+		if res.StatusCode != 400 {
+			t.Fatalf("invalid query %s: %d", query, res.StatusCode)
+		}
+	}
 	res = get("/api/admin/client-tags?tag=env&prefix=gr", true)
 	var values []string
 	err = json.NewDecoder(res.Body).Decode(&values)

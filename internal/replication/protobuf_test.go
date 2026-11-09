@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -81,5 +82,50 @@ func TestStagingRejectsMalformedProtobufLengths(t *testing.T) {
 		if err == nil {
 			t.Fatalf("malformed record accepted: %x", raw)
 		}
+	}
+}
+
+// Protobuf omits empty repeated fields. Both transport decoding and persisted
+// mirror decoding must still expose the HTTP contract rules:[], never null.
+func TestProtobufEmptyRulesRemainJSONArray(t *testing.T) {
+	for _, rules := range [][]config.Rule{nil, {}} {
+		state := &config.State{ID: "no-rules", Key: config.Key{Namespace: "public", Group: "DEFAULT_GROUP", Name: "plain.yaml"},
+			GlobalVersion: 1, Rules: rules, Versions: map[int64]config.Version{1: {Number: 1, Content: "key: value\n", Format: "yaml"}}}
+		assertRules := func(t *testing.T, got *config.State) {
+			t.Helper()
+			raw, err := json.Marshal(got)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var fields map[string]json.RawMessage
+			if err = json.Unmarshal(raw, &fields); err != nil {
+				t.Fatal(err)
+			}
+			if string(fields["rules"]) != "[]" {
+				t.Fatalf("empty rules must be JSON [], got %s", fields["rules"])
+			}
+		}
+		t.Run("persisted", func(t *testing.T) {
+			raw, err := replication.MarshalState(state)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := replication.UnmarshalState(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertRules(t, got)
+		})
+		t.Run("transport", func(t *testing.T) {
+			var data bytes.Buffer
+			if err := replication.NewRecordEncoder(&data).Encode(replication.Record{Key: state.Key, State: state}); err != nil {
+				t.Fatal(err)
+			}
+			var got replication.Record
+			if err := replication.NewRecordDecoder(&data).Decode(&got); err != nil {
+				t.Fatal(err)
+			}
+			assertRules(t, got.State)
+		})
 	}
 }

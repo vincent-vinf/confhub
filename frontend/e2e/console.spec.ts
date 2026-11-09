@@ -756,7 +756,8 @@ test('新建灰度规则遇全量并发更新仍保留显式复制来源', async
   expect(s.beta).toMatchObject({ content: '{"v":1}' })
 })
 
-test('在线客户端只读展示、标签补全与 IP 区间规则', async ({ page }) => {
+test('在线客户端只读展示、筛选、标签补全与 IP 区间规则', async ({ page }) => {
+  test.setTimeout(60000)
   await login(page)
   const name = 'ip-clients.json'
   await save(page.request, name, '{"global":true}')
@@ -782,6 +783,26 @@ test('在线客户端只读展示、标签补全与 IP 区间规则', async ({ p
   await expect(card).toBeVisible({ timeout: 15000 })
   await expect(card).toContainText('canary')
   await expect(card).toContainText('v1')
+  await page.getByLabel('客户端搜索').fill('does-not-exist')
+  await page.getByRole('button', { name: '查询', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '没有符合条件的在线客户端' })).toBeVisible()
+  await page.getByRole('button', { name: '重置筛选' }).click()
+  await expect(card).toBeVisible()
+  await page.getByLabel('客户端搜索').fill('NODE-online')
+  await page.getByLabel('Namespace', { exact: true }).fill('public')
+  await page.getByLabel('Group', { exact: true }).fill('DEFAULT_GROUP')
+  await page.getByLabel('配置名称', { exact: true }).fill('ip-clients')
+  const filterTag = page.getByRole('combobox', { name: '筛选标签名称', exact: true })
+  await filterTag.fill('en')
+  await page.getByRole('option', { name: 'env', exact: true }).click()
+  await page.getByRole('combobox', { name: '筛选标签值', exact: true }).fill('ca')
+  await page.getByRole('option', { name: 'canary', exact: true }).click()
+  await choose(page, '筛选版本状态', 'beta')
+  await page.getByRole('button', { name: '查询', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '没有符合条件的在线客户端' })).toBeVisible()
+  await choose(page, '筛选版本状态', '全量')
+  await page.getByRole('button', { name: '查询', exact: true }).click()
+  await expect(card).toBeVisible()
   await page.screenshot({ path: '../docs/images/frontend/clients-light.png', fullPage: true })
   expect(
     (await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze()).violations,
@@ -832,6 +853,14 @@ test('在线客户端只读展示、标签补全与 IP 区间规则', async ({ p
   await page.getByRole('link', { name: '在线客户端', exact: true }).click()
   await expect(card).toBeVisible()
   await expect(card).toContainText('beta', { timeout: 15000 })
+  await choose(page, '筛选版本状态', 'beta')
+  await page.getByRole('button', { name: '查询', exact: true }).click()
+  await expect(card).toBeVisible()
+  await page.setViewportSize({ width: 812, height: 375 })
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+    .toBeTruthy()
+  await page.setViewportSize({ width: 375, height: 812 })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy()
   await page.getByRole('button', { name: '切换深色主题' }).click()
   await expect(page.getByRole('button', { name: '刷新', exact: true })).toHaveCSS(

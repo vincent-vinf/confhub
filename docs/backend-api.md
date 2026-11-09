@@ -174,6 +174,12 @@ target 省略或为 `global` 时全量保存，`beta` 时覆盖唯一 beta；不
 
 - `GET /api/admin/clients?after=<连接ID>&limit=25`：要求已登录且拥有 clients.read（或系统管理员），返回 `{clients:[],next_after?:string}`。按连接 ID 游标分页，limit 1–100。连接 ID 每次重连重新生成，不代表机器身份。
 - 每个客户端包含 `id/instance_id/source_address/connected_at/refreshed_at/tags/subscriptions`。`subscriptions` 项包含 `key/id/version/revision/beta/rule_id/deleted/sent`，没有配置正文。`sent:false` 表示尚未成功发送；`sent:true` 表示最近一次成功的 WebSocket 写入，不代表应用确认。beta 显示为 beta，规则 ID 仅说明首条匹配条件。
+- 在线客户端筛选参数可组合，作用于所有有效实例的完整连接集合，再按游标分页：
+  - `search`：主机名、`sys.ip`、远端地址、连接 ID 或实例 ID，忽略大小写的字面子串匹配，最多 512 字节。
+  - `namespace`、`group`：订阅键精确匹配，各最多 255 字节；`name`：配置名称忽略大小写的字面子串匹配，最多 255 字节。
+  - `status`：`main`（已发送全量）、`beta`（已发送灰度）、`waiting`（等待发送）、`deleted`（已删除或不存在）、`unsubscribed`（暂无订阅）；省略表示不限。订阅键与状态必须命中同一条订阅；暂无订阅与任何订阅键条件组合均不匹配。
+  - `tag`：标签名称精确匹配，最多 128 字节。省略 `tag_value` 时匹配该标签任意值；提供 `tag_value` 时精确匹配（大小写、空白、特殊字符均保留，最多 512 字节），`tag_value=` 匹配空字符串。只有 `tag_value` 而无 `tag`、非法状态或超长字段返回 400。
+  - 例：`GET /api/admin/clients?namespace=public&group=DEFAULT_GROUP&name=app&status=beta&tag=env&tag_value=canary&limit=25`。
 - `GET /api/admin/client-tags?tag=<标签名>&prefix=<前缀>`：返回所有有效实例中对应标签的去重值。省略 tag 返回标签名，始终包含符合前缀的 `sys.ip/sys.hostname`。大小写、空字符串和尾部空格保持字符串语义；prefix 为字面前缀（`%/_` 不是通配符），最多 100 条。继续输入前缀可发现初始列表之外的值。
 - 在线仅指成功升级的 WebSocket 连接，包含暂未订阅的连接；HTTP GET 不记录。标签由客户端传入，远端地址单独展示。
 - 实例每 5 秒同步连接快照，仅写入变化连接，数据库时钟租约 20 秒。正常断连下次同步移除；异常节点过期即不再查询到，每分钟分批清理。网页每 5 秒读取，正常断连约 10 秒内从页面移除。没有远程断开、修改标签等管理操作。

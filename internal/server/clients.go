@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/vincent-vinf/confhub/internal/clientinfo"
 	"github.com/vincent-vinf/confhub/internal/config"
 )
 
@@ -22,7 +23,15 @@ func (s *Server) clients(c *gin.Context) {
 		}
 		limit = v
 	}
-	page, err := s.store.Clients(c.Request.Context(), c.Query("after"), limit)
+	filter := clientinfo.Filter{
+		Search: c.Query("search"), Namespace: c.Query("namespace"), Group: c.Query("group"),
+		Name: c.Query("name"), Status: c.Query("status"), Tag: c.Query("tag"),
+	}
+	if c.Request.URL.Query().Has("tag_value") {
+		value := c.Query("tag_value")
+		filter.TagValue = &value
+	}
+	page, err := s.store.Clients(c.Request.Context(), c.Query("after"), limit, filter)
 	s.respond(c, page, err)
 }
 func (s *Server) clientTags(c *gin.Context) {

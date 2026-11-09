@@ -9,6 +9,7 @@ import type {
   UserInput,
   Baseline,
   ClientPage,
+  ClientFilter,
   ConfigKey,
   ConfigState,
   ConfigSummary,
@@ -163,10 +164,13 @@ export const api = {
       `${base}/users/${part(user.id)}/password`,
       body('POST', { password, expected_revision: user.revision, confirmed: true }),
     ),
-  clients: (after = '', signal?: AbortSignal) =>
-    request<ClientPage>(`${base}/clients?${new URLSearchParams({ after, limit: '25' })}`, {
-      signal,
-    }),
+  clients: (filter: ClientFilter, after = '', signal?: AbortSignal) => {
+    const params = new URLSearchParams({ after, limit: '25' })
+    for (const [key, value] of Object.entries(filter)) {
+      if (value !== '') params.set(key, value)
+    }
+    return request<ClientPage>(`${base}/clients?${params}`, { signal })
+  },
   clientTags: (tag = '', prefix = '', signal?: AbortSignal) =>
     request<string[]>(`${base}/client-tags?${new URLSearchParams({ tag, prefix })}`, { signal }),
   login: (username: string, password: string) =>
@@ -193,7 +197,10 @@ export const api = {
       { signal },
     ),
   state: (key: ConfigKey, signal?: AbortSignal) =>
-    request<ConfigState>(configPath(key), { signal }),
+    request<ConfigState>(configPath(key), { signal }).then((state) => ({
+      ...state,
+      rules: state.rules ?? [],
+    })),
   save: (key: ConfigKey, edit: Edit) => request<Mutation>(configPath(key), body('PUT', edit)),
   remove: (key: ConfigKey, baseline: Baseline) =>
     request<Mutation>(configPath(key), body('DELETE', { ...baseline, confirmed: true })),

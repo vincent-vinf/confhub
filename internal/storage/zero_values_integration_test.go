@@ -70,7 +70,7 @@ func TestPresenceLaterBatchFailureRollsBackEarlierWritesAndRemovals(t *testing.T
 	if err := s.SyncPresence(ctx, "node", invalid, time.Minute); !errors.Is(err, config.ErrInvalid) {
 		t.Fatalf("duplicate accepted: %v", err)
 	}
-	page, err := s.Clients(ctx, "", 100)
+	page, err := s.Clients(ctx, "", 100, clientinfo.Filter{})
 	if err != nil || len(page.Clients) != 55 {
 		t.Fatal("partial batch survived rollback", page, err)
 	}
@@ -85,7 +85,7 @@ func TestPresenceLaterBatchFailureRollsBackEarlierWritesAndRemovals(t *testing.T
 	if err = s.SyncPresence(ctx, "node", nil, time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	page, err = s.Clients(ctx, "", 100)
+	page, err = s.Clients(ctx, "", 100, clientinfo.Filter{})
 	if err != nil || len(page.Clients) != 0 {
 		t.Fatal("batch removals did not clear clients", page, err)
 	}

@@ -157,3 +157,70 @@ test('边缘登录后只读查看镜像、beta、规则、客户端及同步状�
   // Logging in/out at the edge must not overwrite the cloud's browser session.
   expect((await page.request.get(cloud + '/api/admin/me')).status()).toBe(200)
 })
+
+test('无灰度规则的配置可从边缘列表打开，查看内容、本地版本并自动刷新', async ({ page }) => {
+  const plainKey = { ...key, name: 'edge-no-rules.yaml' }
+  const plainPath = path.replace(key.name, plainKey.name)
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  expect(
+    (
+      await page.request.post(cloud + '/api/admin/login', {
+        headers: { Origin: cloud },
+        data: { username: 'admin', password: 'ui-test-password' },
+      })
+    ).ok(),
+  ).toBeTruthy()
+  const created = await page.request.put(cloud + plainPath, {
+    headers: { Origin: cloud },
+    data: {
+      confirmed: true,
+      content: 'message: no-rules\n',
+      format: 'yaml',
+      description: '无灰度规则',
+    },
+  })
+  expect(created.ok()).toBeTruthy()
+  const initial = (await created.json()).state
+  expect(
+    (
+      await page.request.post(edge + '/api/admin/login', {
+        headers: { Origin: edge },
+        data: { username: 'admin', password: 'ui-edge-password' },
+      })
+    ).ok(),
+  ).toBeTruthy()
+  await expect.poll(async () => (await page.request.get(edge + plainPath)).status()).toBe(200)
+  await page.goto(edge + '/configs')
+  await page.getByRole('link', { name: `打开 ${plainKey.name}`, exact: true }).click()
+  const content = page.getByRole('textbox', { name: '配置内容', exact: true })
+  await expect(content).toHaveText('message: no-rules\n')
+  await expect(content).toHaveAttribute('aria-readonly', 'true')
+  await expect(page.getByRole('heading', { name: '页面暂时无法显示' })).toHaveCount(0)
+  expect((await (await page.request.get(edge + plainPath)).json()).rules).toEqual([])
+  await page.getByRole('tab', { name: /^灰度规则/ }).click()
+  await expect(page.getByRole('heading', { name: '当前使用全量发布' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '新增规则', exact: true })).toHaveCount(0)
+  await page.getByRole('tab', { name: '本地版本', exact: true }).click()
+  await expect(page.getByRole('button', { name: '查看 v1', exact: true })).toBeVisible()
+  await page.getByRole('tab', { name: '配置内容', exact: true }).click()
+  expect(
+    (
+      await page.request.put(cloud + plainPath, {
+        headers: { Origin: cloud },
+        data: {
+          expected_id: initial.id,
+          expected_revision: initial.revision,
+          confirmed: true,
+          content: 'message: updated-no-rules\n',
+          format: 'yaml',
+        },
+      })
+    ).ok(),
+  ).toBeTruthy()
+  await expect(content).toHaveText('message: updated-no-rules\n')
+  await page.reload()
+  await expect(content).toHaveText('message: updated-no-rules\n')
+  await expect(page.getByRole('button', { name: '保存并发布', exact: true })).toHaveCount(0)
+  expect(errors).toEqual([])
+})

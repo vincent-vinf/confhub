@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/vincent-vinf/confhub/internal/clientinfo"
+	"github.com/vincent-vinf/confhub/internal/config"
 	"github.com/vincent-vinf/confhub/internal/testutil"
 	"testing"
 	"time"
@@ -20,7 +21,7 @@ func TestPresenceSharesClientsAndExpiresReplicaLeases(t *testing.T) {
 	if err := s.SyncPresence(ctx, "node-b", []clientinfo.Client{b}, 60*time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
-	page, err := s.Clients(ctx, "", 1)
+	page, err := s.Clients(ctx, "", 1, clientinfo.Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,17 +36,23 @@ func TestPresenceSharesClientsAndExpiresReplicaLeases(t *testing.T) {
 		t.Fatal(suggestions)
 	}
 	time.Sleep(80 * time.Millisecond)
-	page, err = s.Clients(ctx, "", 25)
+	page, err = s.Clients(ctx, "", 25, clientinfo.Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(page.Clients) != 1 || page.Clients[0].InstanceID != "node-a" {
 		t.Fatalf("expired lease: %+v", page)
 	}
+
+	value := "prod"
+	filtered, err := s.Clients(ctx, "", 25, clientinfo.Filter{Tag: "env", TagValue: &value})
+	if err != nil || len(filtered.Clients) != 0 {
+		t.Fatalf("expired clients matched filter: %+v %v", filtered, err)
+	}
 	if err := s.SyncPresence(ctx, "node-a", nil, time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	page, err = s.Clients(ctx, "", 25)
+	page, err = s.Clients(ctx, "", 25, clientinfo.Filter{})
 	if err != nil || len(page.Clients) != 0 {
 		t.Fatalf("disconnect: %+v %v", page, err)
 	}
@@ -96,7 +103,7 @@ func TestPresenceSuggestionsPreserveLiteralValuesAndReconcileUpdates(t *testing.
 	if err != nil || len(got) != 1 || got[0] != "new" {
 		t.Fatal(got, err)
 	}
-	page, err := s.Clients(ctx, "", 25)
+	page, err := s.Clients(ctx, "", 25, clientinfo.Filter{})
 	if err != nil || len(page.Clients) != 1 {
 		t.Fatal(page, err)
 	}
@@ -104,7 +111,7 @@ func TestPresenceSuggestionsPreserveLiteralValuesAndReconcileUpdates(t *testing.
 	if err := s.SyncPresence(ctx, "node", []clientinfo.Client{clients[0], clients[0]}, time.Minute); err == nil {
 		t.Fatal("duplicate accepted")
 	}
-	page, err = s.Clients(ctx, "", 25)
+	page, err = s.Clients(ctx, "", 25, clientinfo.Filter{})
 	if err != nil || len(page.Clients) != 1 || page.Clients[0].Tags["env"] != "new" {
 		t.Fatal(page, err)
 	}
@@ -151,7 +158,7 @@ func TestPresencePreservesNULTagsWithoutHidingHealthyClients(t *testing.T) {
 	if err := s.SyncPresence(ctx, "node", clients, time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	page, err := s.Clients(ctx, "", 25)
+	page, err := s.Clients(ctx, "", 25, clientinfo.Filter{})
 	if err != nil || len(page.Clients) != 2 {
 		t.Fatal(page, err)
 	}
@@ -165,5 +172,73 @@ func TestPresencePreservesNULTagsWithoutHidingHealthyClients(t *testing.T) {
 	names, err := s.TagSuggestions(ctx, "", "odd\x00")
 	if err != nil || len(names) != 1 || names[0] != "odd\x00tag" {
 		t.Fatal(names, err)
+	}
+}
+
+func TestClientFiltersApplyBeforePaginationAcrossReplicas(t *testing.T) {
+	s := testutil.Store(t)
+	ctx := context.Background()
+	clients := []clientinfo.Client{}
+	// Matches begin beyond both the default page and an internal scan batch.
+	for i := 0; i < 270; i++ {
+		c := clientinfo.Client{ID: fmt.Sprintf("c%03d", i), Tags: map[string]string{"env": "prod"}}
+		if i >= 260 {
+			c.Tags["sys.hostname"] = "Node-Match"
+			c.Tags["env"] = "%_ "
+			c.Subscriptions = []clientinfo.Subscription{{Key: config.Key{Namespace: "public", Group: "prod", Name: "app.yaml"}, Sent: true, Beta: true}}
+		}
+		clients = append(clients, c)
+	}
+	if err := s.SyncPresence(ctx, "one", clients[:265], time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SyncPresence(ctx, "two", clients[265:], time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	filter := clientinfo.Filter{Search: "node-match", Namespace: "public", Group: "prod", Name: "APP", Status: "beta"}
+	var ids []string
+	after := ""
+	for {
+		p, err := s.Clients(ctx, after, 3, filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range p.Clients {
+			ids = append(ids, c.ID)
+		}
+		if p.NextAfter == "" {
+			break
+		}
+		after = p.NextAfter
+	}
+	if len(ids) != 10 || ids[0] != "c260" || ids[9] != "c269" {
+		t.Fatalf("filtered pagination: %v", ids)
+	}
+	value := "%_ "
+	filter.Tag = "env"
+	filter.TagValue = &value
+	p, err := s.Clients(ctx, "", 25, filter)
+	if err != nil || len(p.Clients) != 10 {
+		t.Fatalf("tag exact: %+v %v", p, err)
+	}
+	value = "%_"
+	p, err = s.Clients(ctx, "", 25, filter)
+	if err != nil || len(p.Clients) != 0 {
+		t.Fatalf("trimmed tag matched: %+v %v", p, err)
+	}
+	empty := ""
+	if err := s.SyncPresence(ctx, "empty", []clientinfo.Client{{ID: "empty", Tags: map[string]string{"env": ""}}, {ID: "missing"}}, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	p, err = s.Clients(ctx, "", 25, clientinfo.Filter{Tag: "env", TagValue: &empty})
+	if err != nil || len(p.Clients) != 1 || p.Clients[0].ID != "empty" {
+		t.Fatalf("empty tag: %+v %v", p, err)
+	}
+	if err := s.RemovePresence(ctx, "two"); err != nil {
+		t.Fatal(err)
+	}
+	p, err = s.Clients(ctx, "", 25, clientinfo.Filter{Status: "beta"})
+	if err != nil || len(p.Clients) != 5 {
+		t.Fatalf("removed replica: %+v %v", p, err)
 	}
 }
