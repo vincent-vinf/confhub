@@ -32,7 +32,7 @@ export type ConfigState = {
 export type ConfigSummary = Pick<
   ConfigState,
   'id' | 'key' | 'revision' | 'last_version' | 'global_version'
->
+> & { published_at?: string }
 export type VersionPage = { versions: Version[]; next_before?: number }
 export type Baseline = { expected_id: string; expected_revision: number }
 export type Edit = Baseline & {

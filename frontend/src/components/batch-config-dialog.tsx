@@ -113,7 +113,7 @@ export function BatchConfigDialog({
         <ul>
           {configs.map((item) => (
             <li key={item.id} className="mono">
-              {item.key.name}
+              {item.key.group} / {item.key.name}
             </li>
           ))}
         </ul>

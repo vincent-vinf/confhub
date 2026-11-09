@@ -67,7 +67,7 @@ test('只读实例登录、历史与灰度试算、自动刷新和写入限制',
   await expect(page.getByRole('link', { name: '操作审计', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '导入配置', exact: true })).toHaveCount(0)
   await expect(page.getByRole('button', { name: '导出全部', exact: true })).toBeVisible()
-  await page.getByRole('textbox', { name: '搜索本分组配置' }).fill('readonly-ui.yaml')
+  await page.getByRole('textbox', { name: '搜索本命名空间配置' }).fill('readonly-ui.yaml')
   await page.getByRole('link', { name: 'readonly-ui.yaml', exact: true }).click()
   const content = page.getByRole('textbox', { name: '配置内容', exact: true })
   await expect(content).toHaveAttribute('aria-readonly', 'true')

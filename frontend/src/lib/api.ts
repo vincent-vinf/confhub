@@ -114,9 +114,16 @@ function importForm(file: File, namespace: string, policy: ImportPolicy, plan?: 
   return form
 }
 export const api = {
-  exportArchive: (namespace: string, group: string, search = '', names: string[] = []) => {
+  exportArchive: (
+    namespace: string,
+    group: string,
+    search = '',
+    names: string[] = [],
+    keys: ConfigKey[] = [],
+  ) => {
     const params = new URLSearchParams({ namespace, group, search })
     names.forEach((name) => params.append('name', name))
+    if (keys.length) params.set('keys', JSON.stringify(keys))
     return request<Blob>(`${base}/configs/export?${params}`, {}, 'blob')
   },
   previewImport: (file: File, namespace: string, policy: ImportPolicy, signal?: AbortSignal) =>

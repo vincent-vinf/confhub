@@ -74,7 +74,7 @@ test('登录失败、真实创建、语法校验、格式化撤销和保存确�
   await page.getByLabel('密码', { exact: true }).fill(password)
   await page.getByRole('button', { name: '登录控制台' }).click()
   await page.getByRole('link', { name: '新建配置', exact: true }).click()
-  await page.getByLabel('配置名称').fill('创建-测试.json')
+  await page.getByRole('textbox', { name: '配置名称 *', exact: true }).fill('创建-测试.json')
   await choose(page, '配置格式', 'JSON')
   await edit(page, '{invalid')
   await page.getByRole('button', { name: '保存并发布' }).click()
@@ -635,6 +635,7 @@ test('YAML 多文档格式化可撤销，所有支持格式均能切换高亮', 
 
 test('分组搜索涵盖分页之外的配置，失败退出可重试', async ({ page }) => {
   await login(page)
+  await choose(page, '分组', 'DEFAULT_GROUP')
   for (let i = 0; i < 28; i++)
     await save(page.request, `pagination-${String(i).padStart(2, '0')}.json`, '{"v":1}')
   await page.getByRole('button', { name: '刷新配置列表' }).click()
@@ -1051,7 +1052,7 @@ test('统一下拉菜单主题、键盘、长选项与弹窗内 Escape', async (
   const list = page.getByRole('listbox')
   await expect(list).toBeVisible()
   await expect(list).toHaveCSS('background-color', 'rgb(255, 255, 255)')
-  await expect(page.getByRole('option', { name: 'DEFAULT_GROUP', exact: true })).toHaveAttribute(
+  await expect(page.getByRole('option', { name: '全部分组', exact: true })).toHaveAttribute(
     'aria-selected',
     'true',
   )

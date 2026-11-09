@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/vincent-vinf/confhub/internal/config"
 	"gorm.io/gorm"
@@ -80,15 +81,26 @@ type ConfigSummary struct {
 	Revision      int64      `json:"revision"`
 	GlobalVersion int64      `json:"global_version"`
 	LastVersion   int64      `json:"last_version"`
+	PublishedAt   time.Time  `json:"published_at"`
 }
 
 func (s *Store) List(ctx context.Context, namespace, group, after string, limit int) ([]ConfigSummary, error) {
 	if limit < 1 || limit > 200 {
 		return nil, fmt.Errorf("%w: limit must be 1–200", config.ErrInvalid)
 	}
-	var rows []configRow
-	err := s.db.WithContext(ctx).Where(map[string]any{"namespace": namespace, "group_name": group}).
-		Where(clause.Gt{Column: "name", Value: after}).Order("name").Limit(limit).Find(&rows).Error
+	var rows []struct {
+		ID            string
+		Name          string
+		Revision      int64
+		GlobalVersion int64
+		LastVersion   int64
+		PublishedAt   int64
+	}
+	err := s.db.WithContext(ctx).Model(&configRow{}).
+		Select("configs.*, v.created_at AS published_at").
+		Joins("JOIN config_versions v ON v.config_id = configs.id AND v.number = configs.global_version").
+		Where("configs.namespace = ? AND configs.group_name = ?", namespace, group).
+		Where(clause.Gt{Column: "configs.name", Value: after}).Order("configs.name").Limit(limit).Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +108,8 @@ func (s *Store) List(ctx context.Context, namespace, group, after string, limit 
 	for _, row := range rows {
 		result = append(result, ConfigSummary{ID: row.ID,
 			Key:      config.Key{Namespace: namespace, Group: group, Name: row.Name},
-			Revision: row.Revision, GlobalVersion: row.GlobalVersion, LastVersion: row.LastVersion})
+			Revision: row.Revision, GlobalVersion: row.GlobalVersion, LastVersion: row.LastVersion,
+			PublishedAt: time.UnixMicro(row.PublishedAt).UTC()})
 	}
 	return result, nil
 }

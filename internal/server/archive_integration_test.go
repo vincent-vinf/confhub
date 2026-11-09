@@ -12,6 +12,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -227,6 +228,45 @@ func TestArchivePermissionsReadonlyAndAudit(t *testing.T) {
 	}
 	get(ts.URL, reader, "DEFAULT_GROUP", 200)
 	get(ts.URL, reader, "MISSING", 403)
+	// Namespace exports filter out unreadable groups; explicit selections must
+	// authorize every complete key, including when two groups share a name.
+	getScope := func(query url.Values, token string, want int) []configarchive.Item {
+		t.Helper()
+		req, _ := http.NewRequest("GET", ts.URL+"/api/admin/configs/export?"+query.Encode(), nil)
+		req.AddCookie(&http.Cookie{Name: "confhub_admin", Value: token})
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		raw, _ := io.ReadAll(res.Body)
+		if res.StatusCode != want {
+			t.Fatalf("export scope: %d want %d: %s", res.StatusCode, want, raw)
+		}
+		if want != 200 {
+			return nil
+		}
+		p, err := configarchive.Parse(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p.Items
+	}
+	q := url.Values{"namespace": {"public"}}
+	if items := getScope(q, reader, 200); len(items) != 1 || items[0].Group != "DEFAULT_GROUP" {
+		t.Fatalf("namespace export leaked groups: %+v", items)
+	}
+	if items := getScope(q, admin, 200); len(items) != 2 {
+		t.Fatalf("namespace export: %+v", items)
+	}
+	keys, _ := json.Marshal([]config.Key{{Namespace: "public", Group: "DEFAULT_GROUP", Name: "allowed"}, {Namespace: "public", Group: "MISSING", Name: "forbidden"}})
+	q.Set("keys", string(keys))
+	getScope(q, reader, 403)
+	if items := getScope(q, admin, 200); len(items) != 2 {
+		t.Fatalf("selected export: %+v", items)
+	}
+	q.Set("keys", `[{"namespace":"other","group":"DEFAULT_GROUP","name":"allowed"}]`)
+	getScope(q, admin, 400)
 	readonlyApp, e := server.New(store, nil, server.Options{JWTSecret: secret, JWTExpiry: time.Hour, ReadOnly: true})
 	if e != nil {
 		t.Fatal(e)

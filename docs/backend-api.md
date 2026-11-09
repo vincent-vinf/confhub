@@ -28,6 +28,8 @@
 
 下文用 `CONFIG` 表示一份配置的完整管理路径。
 
+配置列表摘要包含 `published_at`（当前全量版本的发布时间，RFC 3339）。该字段与边缘镜像中的云端发布时间一致，不随 beta 或规则编辑更新。控制台默认汇总当前命名空间下全部可读分组，在完整摘要范围排序后分页。
+
 保存正文：
 
 ```json
@@ -66,6 +68,7 @@ target 省略或为 `global` 时全量保存，`beta` 时覆盖唯一 beta；不
 仅支持新版 `group/dataId` + `.metadata.yml` ZIP。只交换当前全量正文、格式和描述，名称与正文原样保留；不交换历史、beta 或规则。完整约束见 [功能规格](nacos-import-export-spec.md)。
 
 - `GET /api/admin/configs/export?namespace=public&group=DEFAULT_GROUP&search=app`：读取当前分组中名称包含 search 的所有分页（不区分大小写、按字面匹配）。重复 `name=app.yaml&name=other` 可导出选中项；选中项已不存在则失败。返回 `application/zip`，附件名为 `nacos_config_export_时间.zip`。要求目标分组 `config.read`；只读与 edge 实例也可导出。
+- 省略或留空 `group` 时导出命名空间下所有可读分组，保留 ZIP 内各 Group。跨分组勾选使用 URL 编码的 `keys` JSON 数组，例如 `[{"namespace":"public","group":"apps","name":"app.yaml"}]`，不能与 `name` 混用；每个键必须属于目标命名空间及指定分组（若有），逐项检查权限与存在性，失败不生成归档。所有分组的数据在同一个数据库快照内读取，项数及正文上限按整包计算。
 - `POST /api/admin/configs/import/preview`：multipart 字段 `file`、`namespace` 和 `policy`（`ABORT` 默认 / `SKIP` / `OVERWRITE`）。目标 namespace 必须存在，所有包内 group 都要求 `config.write`；仅系统管理员能自动创建缺失分组。返回 `{namespace,policy,digest,entries:[{group,name,expected_id,expected_revision,action,error?}],missing_groups:[],can_import}`。action 为 create/conflict/skip/overwrite/unchanged/error；无正文。同名冲突、逐项格式错误或无权自动创建的缺失分组，预览仍返回全部条目的处理结果，can_import 为 false；error 提供逐项原因。包内任一目标没有写权限则整次预览返回 403，不查询无权限配置状态。
 - `POST /api/admin/configs/import`：同一个 multipart ZIP，附上 `plan`（完整预览结果的 JSON 字符串）和 `confirmed=true`。重新解析文件、核对指纹与目标、重新授权，然后在一个事务内保存版本、组织及事件；成功后通知客户端。可跨实例提交，无服务端草稿状态。
 - 成功返回 `{created,updated,skipped,unchanged,sequence}`。正文和格式均不变时不产生新版本，description 也不更新；覆盖保留 beta/规则。全部跳过或不变不产生事件。待写项的身份/修订变化或新名称被抢占返回 409，整包未提交，必须重新预览；普通保存的并发保护同样适用。

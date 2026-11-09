@@ -256,3 +256,39 @@ func TestImportPreviewListsAllItemErrorsWithoutWriting(t *testing.T) {
 		t.Fatal("preview wrote data", err)
 	}
 }
+
+func TestExportAcrossGroupsKeepsSameNamesAndSelection(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	for _, group := range []string{"A", "B", "EMPTY"} {
+		if err := s.CreateGroup(ctx, "public", group); err != nil {
+			t.Fatal(err)
+		}
+		if group == "EMPTY" {
+			continue
+		}
+		_, err := s.Save(ctx, config.Key{Namespace: "public", Group: group, Name: "same.yaml"}, config.Edit{Content: "value: " + group, Format: "yaml"})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	items, err := s.ExportArchiveGroups(ctx, "public", map[string][]string{"A": nil, "B": nil, "EMPTY": nil}, "same", false)
+	if err != nil || len(items) != 2 || items[0].Group != "A" || items[1].Group != "B" {
+		t.Fatalf("groups: %+v %v", items, err)
+	}
+	items, err = s.ExportArchiveGroups(ctx, "public", map[string][]string{"B": {"same.yaml"}}, "", false)
+	if err != nil || len(items) != 1 || items[0].Group != "B" {
+		t.Fatalf("selection: %+v %v", items, err)
+	}
+	if _, err = s.ExportArchiveGroups(ctx, "public", map[string][]string{"A": {"same.yaml"}, "B": {"missing"}}, "", false); !errors.Is(err, config.ErrNotFound) {
+		t.Fatalf("missing selection: %v", err)
+	}
+	rows, err := s.List(ctx, "public", "A", "", 25)
+	if err != nil || len(rows) != 1 || rows[0].ID == "" || rows[0].GlobalVersion != 1 || rows[0].PublishedAt.IsZero() {
+		t.Fatalf("summary: %+v %v", rows, err)
+	}
+	state, err := s.Snapshot(ctx, rows[0].Key)
+	if err != nil || !rows[0].PublishedAt.Equal(state.Versions[1].CreatedAt) {
+		t.Fatalf("publication timestamp: %+v %v", rows, err)
+	}
+}

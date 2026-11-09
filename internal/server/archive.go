@@ -15,15 +15,56 @@ import (
 
 func (s *Server) exportArchive(c *gin.Context) {
 	ns, group := c.Query("namespace"), c.Query("group")
-	if ns == "" || group == "" {
-		s.respond(c, nil, fmt.Errorf("%w: namespace and group are required", config.ErrInvalid))
+	if ns == "" {
+		s.respond(c, nil, fmt.Errorf("%w: namespace is required", config.ErrInvalid))
 		return
 	}
 	if !s.require(c, "config.read", ns, group) {
 		return
 	}
 	auditDetails(c, ns+" / "+group, map[string]any{"selected_count": len(c.QueryArray("name")), "search": auditText(c.Query("search"), 128)})
-	items, err := s.store.ExportArchive(c.Request.Context(), ns, group, c.QueryArray("name"), c.Query("search"), s.options.Edge)
+	scopes := map[string][]string{}
+	if raw := c.Query("keys"); raw != "" {
+		var keys []config.Key
+		if err := json.Unmarshal([]byte(raw), &keys); err != nil || len(keys) == 0 || len(keys) > configarchive.MaxItems || len(c.QueryArray("name")) > 0 {
+			s.respond(c, nil, fmt.Errorf("%w: invalid export selection", config.ErrInvalid))
+			return
+		}
+		for _, key := range keys {
+			if key.Namespace != ns || (group != "" && key.Group != group) || key.Validate() != nil {
+				s.respond(c, nil, config.ErrInvalid)
+				return
+			}
+			if !s.require(c, "config.read", ns, key.Group) {
+				return
+			}
+			scopes[key.Group] = append(scopes[key.Group], key.Name)
+		}
+	} else if group != "" {
+		scopes[group] = c.QueryArray("name")
+	} else {
+		if len(c.QueryArray("name")) > 0 {
+			s.respond(c, nil, config.ErrInvalid)
+			return
+		}
+		var groups []string
+		var err error
+		if s.options.Edge {
+			groups, err = s.store.MirrorGroups(c.Request.Context(), ns)
+		} else {
+			groups, err = s.store.Groups(c.Request.Context(), ns)
+		}
+		if err != nil {
+			s.respond(c, nil, err)
+			return
+		}
+		for _, name := range groups {
+			if currentUser(c).Allows("config.read", ns, name) {
+				scopes[name] = nil
+			}
+		}
+	}
+	items, err := s.store.ExportArchiveGroups(c.Request.Context(), ns, scopes, c.Query("search"), s.options.Edge)
 	if err != nil {
 		s.respond(c, nil, err)
 		return

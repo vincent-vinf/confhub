@@ -60,7 +60,11 @@ func (s *Store) MirrorList(ctx context.Context, namespace, group, after string, 
 				return err
 			}
 			for _, row := range rows {
-				result = append(result, ConfigSummary{ID: row.ID, Key: config.Key{Namespace: namespace, Group: group, Name: row.Name}, Revision: row.Revision, GlobalVersion: row.GlobalVersion, LastVersion: row.LastVersion})
+				v, err := loadVersion(q.Session(&gorm.Session{NewDB: true}), row.ID, row.GlobalVersion)
+				if err != nil {
+					return err
+				}
+				result = append(result, ConfigSummary{ID: row.ID, Key: config.Key{Namespace: namespace, Group: group, Name: row.Name}, Revision: row.Revision, GlobalVersion: row.GlobalVersion, LastVersion: row.LastVersion, PublishedAt: v.CreatedAt})
 			}
 			return nil
 		}
@@ -73,7 +77,7 @@ func (s *Store) MirrorList(ctx context.Context, namespace, group, after string, 
 			if err != nil {
 				return err
 			}
-			result = append(result, ConfigSummary{ID: state.ID, Key: state.Key, Revision: state.Revision, GlobalVersion: state.GlobalVersion, LastVersion: state.LastVersion})
+			result = append(result, ConfigSummary{ID: state.ID, Key: state.Key, Revision: state.Revision, GlobalVersion: state.GlobalVersion, LastVersion: state.LastVersion, PublishedAt: state.Versions[state.GlobalVersion].CreatedAt})
 		}
 		return nil
 	})

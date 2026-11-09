@@ -54,7 +54,7 @@ func TestMirrorCatalogPagesOnlyActiveSnapshotAndSurvivesFailedReplacement(t *tes
 		t.Fatal(got, err)
 	}
 	first, err := edge.MirrorList(ctx, "region", "apps", "", 1)
-	if err != nil || len(first) != 1 || first[0].Key.Name != "a" || first[0].GlobalVersion != 1 {
+	if err != nil || len(first) != 1 || first[0].Key.Name != "a" || first[0].GlobalVersion != 1 || first[0].PublishedAt.IsZero() {
 		t.Fatal(first, err)
 	}
 	second, err := edge.MirrorList(ctx, "region", "apps", "a", 1)

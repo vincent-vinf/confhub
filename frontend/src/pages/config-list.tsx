@@ -4,6 +4,9 @@ import { useQuery } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
   ArrowRight,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
   ChevronLeft,
   ChevronRight,
   FileCode2,
@@ -21,13 +24,15 @@ import { Badge, Button, Empty, ErrorNotice, Loading } from '../components/ui'
 import { ImportConfigDialog } from '../components/import-config-dialog'
 import { BatchConfigDialog } from '../components/batch-config-dialog'
 import { useAuth, usePending, useToast, usePermission } from '../components/providers'
+import { allows } from '../lib/permissions'
+import { formatDate } from '../lib/config'
 import type { ConfigSummary } from '../lib/types'
 
 export function ConfigListPage() {
   const { user } = useAuth()
   const [params, setParams] = useSearchParams()
   const namespace = params.get('namespace') ?? 'public',
-    group = params.get('group') ?? 'DEFAULT_GROUP'
+    group = params.get('group') ?? ''
   const readable = usePermission('config.read', namespace, group)
   const importable = usePermission('config.write', namespace)
   const [importOpen, setImportOpen] = useState(false)
@@ -39,7 +44,10 @@ export function ConfigListPage() {
   const manage = usePermission('organization.manage')
   const [search, setSearch] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
-  const [cursors, setCursors] = useState([''])
+  const [sort, setSort] = useState<{
+    column: 'name' | 'group' | 'version' | 'published'
+    direction: 'asc' | 'desc'
+  }>({ column: 'name', direction: 'asc' })
   const [searchPage, setSearchPage] = useState(0)
   const [selected, setSelected] = useState<ConfigSummary[]>([])
   const [batchAction, setBatchAction] = useState<'delete' | 'move'>()
@@ -52,15 +60,25 @@ export function ConfigListPage() {
     queryFn: ({ signal }) => api.groups(namespace, signal),
     enabled: namespaces.data?.includes(namespace) === true,
   })
-  const listing = useQuery({
-    queryKey: ['configs', namespace, group, cursors.at(-1)],
-    queryFn: ({ signal }) => api.list(namespace, group, cursors.at(-1), 25, signal),
-    enabled: groups.data?.includes(group) === true && !searchQuery,
-  })
-  const index = useQuery({
-    queryKey: ['config-index', namespace, group],
-    queryFn: ({ signal }) => groupIndex(namespace, group, signal),
-    enabled: !!searchQuery && groups.data?.includes(group) === true,
+  const scopeReady =
+    namespaces.data?.includes(namespace) === true &&
+    !!groups.data &&
+    (!group || groups.data.includes(group))
+  const query = useQuery({
+    queryKey: ['config-index', namespace, group, group ? undefined : groups.data],
+    queryFn: async ({ signal }) => {
+      const result: ConfigSummary[] = []
+      const scopeGroups = group ? [group] : (groups.data ?? [])
+      // Bound concurrency while reusing the existing per-group keyset API.
+      for (let offset = 0; offset < scopeGroups.length; offset += 4) {
+        const pages = await Promise.all(
+          scopeGroups.slice(offset, offset + 4).map((name) => groupIndex(namespace, name, signal)),
+        )
+        result.push(...pages.flat())
+      }
+      return result
+    },
+    enabled: scopeReady,
   })
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -70,25 +88,70 @@ export function ConfigListPage() {
     return () => clearTimeout(timer)
   }, [search])
   useEffect(() => {
-    setCursors([''])
     setSearch('')
     setSearchQuery('')
     setSearchPage(0)
   }, [namespace, group])
-  const filtered = searchQuery
-    ? index.data?.filter((config) =>
-        config.key.name.toLowerCase().includes(searchQuery.toLowerCase()),
-      )
-    : undefined
-  const query = searchQuery ? index : listing
-  const rows = searchQuery ? filtered?.slice(searchPage * 25, (searchPage + 1) * 25) : listing.data
-  const hasNext = searchQuery
-    ? (filtered?.length ?? 0) > (searchPage + 1) * 25
-    : rows?.length === 25
-  const pageNumber = searchQuery ? searchPage + 1 : cursors.length
+  const filtered = query.data?.filter((config) =>
+    config.key.name.toLowerCase().includes(searchQuery.toLowerCase()),
+  )
+  const ordered = filtered?.slice().sort((a, b) => {
+    let order = 0
+    switch (sort.column) {
+      case 'name':
+        order = a.key.name.localeCompare(b.key.name, 'zh-CN', { numeric: true })
+        break
+      case 'group':
+        order = a.key.group.localeCompare(b.key.group, 'zh-CN', { numeric: true })
+        break
+      case 'version':
+        order = a.global_version - b.global_version
+        break
+      case 'published':
+        order = Date.parse(a.published_at ?? '') - Date.parse(b.published_at ?? '')
+        break
+    }
+    const stable = a.key.group.localeCompare(b.key.group) || a.key.name.localeCompare(b.key.name)
+    return ((Number.isNaN(order) ? 0 : order) || stable) * (sort.direction === 'asc' ? 1 : -1)
+  })
+  const rows = ordered?.slice(searchPage * 25, (searchPage + 1) * 25)
+  const hasNext = (ordered?.length ?? 0) > (searchPage + 1) * 25
+  const pageNumber = searchPage + 1
+  const selectedWritable =
+    writable &&
+    selected.every((item) => allows(user, 'config.write', item.key.namespace, item.key.group))
+  const creationGroup =
+    group ||
+    (groups.data?.includes('DEFAULT_GROUP') &&
+    allows(user, 'config.write', namespace, 'DEFAULT_GROUP')
+      ? 'DEFAULT_GROUP'
+      : groups.data?.find((name) => allows(user, 'config.write', namespace, name))) ||
+    ''
   useEffect(() => {
     setSelected([])
-  }, [namespace, group, searchQuery, searchPage, pageNumber, writable])
+  }, [namespace, group, searchQuery, searchPage, sort, writable])
+  function sortHeading(column: typeof sort.column, label: string) {
+    const active = sort.column === column
+    const Icon = active ? (sort.direction === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown
+    return (
+      <th
+        scope="col"
+        aria-sort={active ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'}
+      >
+        <button
+          className="table-sort"
+          onClick={() => {
+            setSort({ column, direction: active && sort.direction === 'asc' ? 'desc' : 'asc' })
+            setSearchPage(0)
+          }}
+          aria-label={`${label}，点击${active && sort.direction === 'asc' ? '降序' : '升序'}排列`}
+        >
+          {label}
+          <Icon size={14} aria-hidden="true" />
+        </button>
+      </th>
+    )
+  }
   const emptyMirror =
     user?.role === 'edge' &&
     ((namespaces.isSuccess && namespaces.data.length === 0) ||
@@ -97,7 +160,7 @@ export function ConfigListPage() {
     ? undefined
     : namespaces.data && !namespaces.data.includes(namespace)
       ? '此命名空间不可访问，请选择有权限的命名空间。'
-      : groups.data && !groups.data.includes(group)
+      : group && groups.data && !groups.data.includes(group)
         ? '此分组不可访问，请选择有权限的分组。'
         : undefined
   useEffect(() => {
@@ -107,16 +170,6 @@ export function ConfigListPage() {
         { replace: true },
       )
   }, [namespaces.data, params, setParams])
-  useEffect(() => {
-    if (groups.data?.length && !params.has('group'))
-      setParams(
-        {
-          namespace,
-          group: groups.data.includes('DEFAULT_GROUP') ? 'DEFAULT_GROUP' : groups.data[0],
-        },
-        { replace: true },
-      )
-  }, [groups.data, namespace, params, setParams])
   function changeNamespace(value: string) {
     setParams({ namespace: value })
   }
@@ -125,15 +178,21 @@ export function ConfigListPage() {
     const refreshedNamespaces = await namespaces.refetch()
     if (refreshedNamespaces.isError || !refreshedNamespaces.data?.includes(namespace)) return
     const refreshedGroups = await groups.refetch()
-    if (refreshedGroups.isError || !refreshedGroups.data?.includes(group)) return
+    if (refreshedGroups.isError || (group && !refreshedGroups.data?.includes(group))) return
     await query.refetch()
   }
-  async function exportConfigs(names: string[] = []) {
+  async function exportConfigs(selection: ConfigSummary[] = []) {
     if (exporting) return
     setExporting(true)
     setExportError(undefined)
     try {
-      const blob = await api.exportArchive(namespace, group, names.length ? '' : searchQuery, names)
+      const blob = await api.exportArchive(
+        namespace,
+        group,
+        selection.length ? '' : searchQuery,
+        [],
+        selection.map((item) => item.key),
+      )
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
@@ -165,7 +224,7 @@ export function ConfigListPage() {
           {writable && (
             <Link
               className="button primary"
-              to={`/new?${new URLSearchParams({ namespace, group })}`}
+              to={`/new?${new URLSearchParams({ namespace, group: creationGroup })}`}
               aria-disabled={!!scopeError}
               onClick={(event) => {
                 if (scopeError) event.preventDefault()
@@ -197,12 +256,16 @@ export function ConfigListPage() {
           <Select
             aria-label="分组"
             value={group}
-            onValueChange={(value) => setParams({ namespace, group: value })}
+            onValueChange={(value) => {
+              if (value && sort.column === 'group') setSort({ column: 'name', direction: 'asc' })
+              setParams({ namespace, group: value })
+            }}
           >
+            <option value="">全部分组</option>
             {groups.data?.map((g) => (
               <option key={g}>{g}</option>
             ))}
-            {!groups.data?.includes(group) && <option>{group}</option>}
+            {group && !groups.data?.includes(group) && <option>{group}</option>}
           </Select>
         </label>
         {manage && (
@@ -234,8 +297,8 @@ export function ConfigListPage() {
             <div className="search-field">
               <Search size={17} aria-hidden="true" />
               <input
-                aria-label="搜索本分组配置"
-                placeholder="搜索本分组配置名称…"
+                aria-label={group ? '搜索本分组配置' : '搜索本命名空间配置'}
+                placeholder={group ? '搜索本分组配置名称…' : '搜索本命名空间配置名称…'}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
@@ -266,14 +329,11 @@ export function ConfigListPage() {
               已选择 <strong>{selected.length}</strong> 项
             </span>
             <div className="batch-actions">
-              <Button
-                busy={exporting}
-                onClick={() => exportConfigs(selected.map((c) => c.key.name))}
-              >
+              <Button busy={exporting} onClick={() => exportConfigs(selected)}>
                 <Download size={16} aria-hidden="true" />
                 导出选中
               </Button>
-              {writable && (
+              {selectedWritable && (
                 <>
                   <Button onClick={() => setBatchAction('move')}>
                     <FolderInput size={16} aria-hidden="true" />
@@ -298,7 +358,7 @@ export function ConfigListPage() {
         {emptyMirror ? (
           <Empty title="暂无已同步配置" />
         ) : !scopeError && query.isPending ? (
-          <Loading label={searchQuery ? '正在搜索本分组…' : '正在读取配置…'} />
+          <Loading label={searchQuery ? '正在搜索配置…' : '正在读取配置…'} />
         ) : (
           !scopeError &&
           !query.error &&
@@ -329,8 +389,10 @@ export function ConfigListPage() {
                         </label>
                       </th>
                     )}
-                    <th>配置名称</th>
-                    <th>全量版本</th>
+                    {sortHeading('name', '配置名称')}
+                    {!group && sortHeading('group', '分组')}
+                    {sortHeading('version', '全量版本')}
+                    {sortHeading('published', '全量发布时间')}
                     <th>
                       <span className="sr-only">操作</span>
                     </th>
@@ -347,7 +409,7 @@ export function ConfigListPage() {
                           <label className="selection-toggle">
                             <input
                               type="checkbox"
-                              aria-label={`选择 ${config.key.name}`}
+                              aria-label={`选择 ${group ? config.key.name : `${config.key.group} / ${config.key.name}`}`}
                               checked={selected.some((item) => item.id === config.id)}
                               onChange={(event) =>
                                 setSelected((previous) =>
@@ -368,8 +430,23 @@ export function ConfigListPage() {
                           <span className="mono">{config.key.name}</span>
                         </Link>
                       </td>
+                      {!group && <td className="config-group mono">{config.key.group}</td>}
                       <td>
                         <Badge tone="success">v{config.global_version}</Badge>
+                      </td>
+                      <td className="config-published">
+                        {config.published_at ? (
+                          <time
+                            dateTime={config.published_at}
+                            title={new Date(config.published_at).toLocaleString('zh-CN', {
+                              hour12: false,
+                            })}
+                          >
+                            {formatDate(config.published_at)}
+                          </time>
+                        ) : (
+                          '—'
+                        )}
                       </td>
                       <td>
                         <Link
@@ -388,13 +465,19 @@ export function ConfigListPage() {
             </div>
           ) : (
             <Empty
-              title={searchQuery ? '没有找到匹配的配置' : '这个分组还没有配置'}
+              title={
+                searchQuery
+                  ? '没有找到匹配的配置'
+                  : group
+                    ? '这个分组还没有配置'
+                    : '这个命名空间还没有配置'
+              }
               action={
                 searchQuery ? (
                   <Button onClick={() => setSearch('')}>清除搜索</Button>
                 ) : writable ? (
                   <Link
-                    to={`/new?${new URLSearchParams({ namespace, group })}`}
+                    to={`/new?${new URLSearchParams({ namespace, group: creationGroup })}`}
                     className="button secondary"
                   >
                     创建第一份配置
@@ -410,11 +493,7 @@ export function ConfigListPage() {
             <Button
               aria-label="上一页"
               disabled={pageNumber === 1 || query.isPending}
-              onClick={() =>
-                searchQuery
-                  ? setSearchPage((page) => page - 1)
-                  : setCursors((previous) => previous.slice(0, -1))
-              }
+              onClick={() => setSearchPage((page) => page - 1)}
             >
               <ChevronLeft size={16} aria-hidden="true" />
             </Button>
@@ -422,11 +501,7 @@ export function ConfigListPage() {
             <Button
               aria-label="下一页"
               disabled={!hasNext || query.isPending}
-              onClick={() =>
-                searchQuery
-                  ? setSearchPage((page) => page + 1)
-                  : setCursors((previous) => [...previous, rows!.at(-1)!.key.name])
-              }
+              onClick={() => setSearchPage((page) => page + 1)}
             >
               <ChevronRight size={16} aria-hidden="true" />
             </Button>
@@ -440,12 +515,11 @@ export function ConfigListPage() {
           onSuccess={() => {
             setImportOpen(false)
             setSelected([])
-            setCursors([''])
             setSearchPage(0)
           }}
         />
       )}
-      {writable && batchAction && selected.length > 0 && (
+      {selectedWritable && batchAction && selected.length > 0 && (
         <BatchConfigDialog
           action={batchAction}
           configs={selected}
@@ -453,7 +527,6 @@ export function ConfigListPage() {
           onSuccess={() => {
             setBatchAction(undefined)
             setSelected([])
-            setCursors([''])
             setSearchPage(0)
           }}
         />

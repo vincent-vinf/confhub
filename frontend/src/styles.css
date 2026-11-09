@@ -731,6 +731,7 @@ a.button:hover {
   min-height: 28px;
 }
 .table-scroll {
+  position: relative;
   width: 100%;
   overflow-x: auto;
 }
@@ -760,8 +761,33 @@ tr:last-child td {
 tbody tr:hover {
   background: var(--surface-subtle);
 }
-.config-table th:nth-child(2) {
-  width: 50%;
+.table-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.table-sort:hover,
+th[aria-sort='ascending'] .table-sort,
+th[aria-sort='descending'] .table-sort {
+  color: var(--text);
+}
+.config-group {
+  overflow-wrap: anywhere;
+  max-width: 240px;
+}
+.config-table .config-name {
+  min-width: 160px;
+}
+.config-published {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 .config-table .selection-cell {
   width: 48px;

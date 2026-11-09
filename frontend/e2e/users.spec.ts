@@ -96,9 +96,11 @@ test('创建用户、范围授权、只读浏览及权限更新后的编辑', as
     await expect(reader.getByRole('heading', { name: '配置管理', exact: true })).toBeVisible()
     await expect(reader.getByRole('link', { name: '新建配置', exact: true })).not.toBeVisible()
     await expect(reader.getByRole('checkbox', { name: '全选当前页配置' })).toBeVisible()
-    await reader.getByRole('textbox', { name: '搜索本分组配置' }).fill(name)
+    await reader.getByRole('textbox', { name: '搜索本命名空间配置' }).fill(name)
     await expect(reader.getByRole('link', { name: `打开 ${name}`, exact: true })).toBeVisible()
-    await reader.getByRole('checkbox', { name: `选择 ${name}`, exact: true }).check()
+    await reader
+      .getByRole('checkbox', { name: `选择 DEFAULT_GROUP / ${name}`, exact: true })
+      .check()
     await expect(reader.getByRole('button', { name: '导出选中', exact: true })).toBeVisible()
     await expect(reader.getByRole('button', { name: '导入配置', exact: true })).toHaveCount(0)
     await expect(reader.getByRole('button', { name: '移动配置', exact: true })).toHaveCount(0)

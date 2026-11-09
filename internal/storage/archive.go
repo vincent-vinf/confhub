@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/vincent-vinf/confhub/internal/config"
@@ -11,9 +12,47 @@ import (
 	"gorm.io/gorm"
 )
 
+// ExportArchiveGroups keeps exports across groups in one database snapshot.
+// The caller must authorize every group. Nil names selects all matching names.
+func (s *Store) ExportArchiveGroups(ctx context.Context, namespace string, groups map[string][]string, search string, mirror bool) ([]configarchive.Item, error) {
+	items := []configarchive.Item{}
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		view := &Store{db: tx}
+		names := make([]string, 0, len(groups))
+		for name := range groups {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		total := 0
+		for _, group := range names {
+			// Empty groups are valid when exporting a namespace/search scope.
+			part, err := view.exportArchive(ctx, namespace, group, groups[group], search, mirror, true)
+			if err != nil {
+				return err
+			}
+			for _, item := range part {
+				total += len(item.Content)
+			}
+			items = append(items, part...)
+			if len(items) > configarchive.MaxItems || total > configarchive.MaxBytes {
+				return fmt.Errorf("%w: export exceeds 1000 configurations or 64 MiB", config.ErrInvalid)
+			}
+		}
+		if len(items) == 0 {
+			return fmt.Errorf("%w: no configurations to export", config.ErrInvalid)
+		}
+		return nil
+	}, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	return items, err
+}
+
 // ExportArchive reads one consistent catalog snapshot, including across pages.
 // mirror selects the edge's active generation rather than its management tables.
 func (s *Store) ExportArchive(ctx context.Context, namespace, group string, names []string, search string, mirror bool) ([]configarchive.Item, error) {
+	return s.exportArchive(ctx, namespace, group, names, search, mirror, false)
+}
+
+func (s *Store) exportArchive(ctx context.Context, namespace, group string, names []string, search string, mirror, allowEmpty bool) ([]configarchive.Item, error) {
 	if err := (config.Key{Namespace: namespace, Group: group, Name: "export"}).Validate(); err != nil {
 		return nil, err
 	}
@@ -98,7 +137,7 @@ func (s *Store) ExportArchive(ctx context.Context, namespace, group string, name
 		if len(names) > 0 && len(items) != len(names) {
 			return config.ErrNotFound
 		}
-		if len(items) == 0 {
+		if len(items) == 0 && !allowEmpty {
 			return fmt.Errorf("%w: no configurations to export", config.ErrInvalid)
 		}
 		return nil
