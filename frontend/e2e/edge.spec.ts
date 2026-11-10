@@ -130,6 +130,8 @@ test('边缘登录后只读查看镜像、beta、规则、客户端及同步状�
     socket.onopen = () => socket.send(JSON.stringify({ op: 'subscribe', key }))
   }, key)
   await page.getByRole('link', { name: '在线客户端', exact: true }).click()
+  await expect(page.getByRole('switch', { name: '自动刷新', exact: true })).not.toBeChecked()
+  await page.getByRole('switch', { name: '自动刷新', exact: true }).click()
   const card = page.getByTestId('client-card').filter({ hasText: 'edge-ui-client' })
   await expect(card).toBeVisible({ timeout: 15000 })
   await expect(card).toContainText('beta')

@@ -20,6 +20,7 @@ const empty: ClientFilter = {
 }
 
 export function ClientsPage() {
+  const [autoRefresh, setAutoRefresh] = useState(false)
   const [draft, setDraft] = useState<ClientFilter>(empty)
   const [filter, setFilter] = useState<ClientFilter>(empty)
   const [cursors, setCursors] = useState([''])
@@ -28,8 +29,9 @@ export function ClientsPage() {
     queryKey: ['clients', filter, after],
     queryFn: ({ signal }) => api.clients(filter, after, signal),
     staleTime: 0,
-    refetchInterval: 5000,
-    refetchOnWindowFocus: true,
+    refetchInterval: autoRefresh ? 5000 : false,
+    refetchOnWindowFocus: autoRefresh,
+    refetchOnReconnect: autoRefresh,
   })
   function submit(event: FormEvent) {
     event.preventDefault()
@@ -54,10 +56,25 @@ export function ClientsPage() {
         <div>
           <h1>在线客户端</h1>
         </div>
-        <Button onClick={() => query.refetch()} busy={query.isFetching}>
-          <RefreshCw size={16} aria-hidden="true" />
-          刷新
-        </Button>
+        <div className="client-refresh-actions">
+          <Button
+            variant="ghost"
+            role="switch"
+            aria-checked={autoRefresh}
+            className="client-auto-refresh"
+            onClick={() => {
+              if (!autoRefresh) void query.refetch()
+              setAutoRefresh(!autoRefresh)
+            }}
+          >
+            <span className="client-refresh-track" aria-hidden="true" />
+            自动刷新
+          </Button>
+          <Button onClick={() => query.refetch()} busy={query.isFetching}>
+            <RefreshCw size={16} aria-hidden="true" />
+            刷新
+          </Button>
+        </div>
       </div>
       <section className="panel">
         <form className="client-filters" onSubmit={submit} aria-label="筛选在线客户端">

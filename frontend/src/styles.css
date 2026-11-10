@@ -2744,6 +2744,33 @@ textarea:disabled,
   margin-top: 4px;
 }
 
+.client-refresh-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.client-refresh-track {
+  display: inline-flex;
+  align-items: center;
+  width: 32px;
+  height: 20px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--muted);
+  flex-shrink: 0;
+}
+.client-refresh-track::after {
+  content: '';
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--surface);
+}
+.client-auto-refresh[aria-checked='true'] .client-refresh-track {
+  background: var(--accent);
+  justify-content: flex-end;
+}
 .client-filters {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

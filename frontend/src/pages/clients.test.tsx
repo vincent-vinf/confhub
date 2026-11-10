@@ -1,5 +1,10 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import {
+  focusManager,
+  onlineManager,
+  QueryClient,
+  QueryClientProvider,
+} from '@tanstack/react-query'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { api } from '../lib/api'
@@ -12,7 +17,12 @@ beforeEach(() => {
   vi.spyOn(api, 'clients').mockResolvedValue({ clients: [] })
   vi.spyOn(api, 'clientTags').mockResolvedValue([])
 })
-afterEach(() => client.clear())
+afterEach(() => {
+  client.clear()
+  vi.useRealTimers()
+  focusManager.setFocused(undefined)
+  onlineManager.setOnline(true)
+})
 function open() {
   render(
     <QueryClientProvider client={client}>
@@ -106,4 +116,42 @@ it('翻页带上已应用筛选，重新查询回到第一页，更换标签清�
     ),
   )
   expect(screen.getByRole('button', { name: '上一页客户端' })).toBeDisabled()
+})
+
+it('自动刷新默认关闭，开启定时刷新，关闭后仍可手动刷新', async () => {
+  vi.useFakeTimers()
+  focusManager.setFocused(true)
+  async function advance(ms: number) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms)
+    })
+  }
+  open()
+  await advance(1)
+  const toggle = screen.getByRole('switch', { name: '自动刷新' })
+  expect(toggle).not.toBeChecked()
+  expect(api.clients).toHaveBeenCalledTimes(1)
+  await advance(15000)
+  await act(async () => {
+    focusManager.setFocused(false)
+    focusManager.setFocused(true)
+    onlineManager.setOnline(false)
+    onlineManager.setOnline(true)
+  })
+  await advance(1)
+  expect(api.clients).toHaveBeenCalledTimes(1)
+  fireEvent.click(toggle)
+  await advance(1)
+  expect(toggle).toBeChecked()
+  expect(api.clients).toHaveBeenCalledTimes(2)
+  await advance(5000)
+  expect(api.clients).toHaveBeenCalledTimes(3)
+  fireEvent.click(toggle)
+  await advance(15000)
+  expect(toggle).not.toBeChecked()
+  expect(api.clients).toHaveBeenCalledTimes(3)
+  fireEvent.click(screen.getByRole('button', { name: '刷新' }))
+  await advance(1)
+  expect(api.clients).toHaveBeenCalledTimes(4)
+  expect(toggle).not.toBeChecked()
 })
