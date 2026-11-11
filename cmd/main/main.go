@@ -77,7 +77,7 @@ func run() error {
 			}
 			return transport.DialWebSocket(ctx, options.ReplicationURL, options.ReplicationToken)
 		}
-		worker = replication.NewWorker(store, dial, options.ReplicationLease)
+		worker = replication.NewWorker(store, dial, options.ReplicationLease, options.ReplicationStandbyInterval)
 	}
 	hub := syncer.New(source, syncer.Options{PollInterval: options.PollInterval, FailureTimeout: options.SyncFailureTimeout, CacheBytes: options.CacheBytes})
 	serverOptions := server.Options{JWTSecret: options.JWTSecret, JWTExpiry: options.JWTExpiry, CookieSecure: options.CookieSecure, StaticDir: options.StaticDir, ReadOnly: options.ReadOnly, Edge: options.Role == "edge", Context: ctx, ReplicationWorker: worker, ReplicationPublisher: publisher}

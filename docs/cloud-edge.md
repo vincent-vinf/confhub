@@ -63,6 +63,9 @@ flag 优先于环境变量，所有环境变量前缀为 `CONFHUB_`。常规数�
 | `--replication-token` | `REPLICATION_TOKEN` | 云端/边缘必填，至少 32 字节 |
 | `--replication-subject` | `REPLICATION_SUBJECT` | `confhub.replication`，不能包含通配符 |
 | `--replication-lease` | `REPLICATION_LEASE` | `30s`，至少 `3s` |
+| `--replication-standby-interval` | `REPLICATION_STANDBY_INTERVAL` | `5s`，必须为正数；备用实例检查/竞争同步租约的间隔 |
+
+本实例配置变更与云端复制水位检查共用 `CONFHUB_POLL_INTERVAL`，默认 `1s`；`CONFHUB_SYNC_FAILURE_TIMEOUT` 默认 `10s`。备用实例启动时立即检查租约，后续每次检查结束后等待 `CONFHUB_REPLICATION_STANDBY_INTERVAL`；取消可立即中断等待。主同步实例仍每隔租约时长的三分之一续租（默认 `10s`），云边会话仍每 `2s` 交换水位/收讫信息。正常情况下，云端发布到边缘客户端通知需等待云端和边缘各一次检查，约 `0～2s` 加传输与处理时间；备用检查默认 `5s` 可能在租约到期或释放后额外增加最多约 `5s` 接管等待。
 
 WebSocket 地址例：`wss://cloud.example/api/replication/watch`；NATS 地址例：`tls://user:password@broker.example:4222`。云端/边缘的同步 token 必须一致，不能使用管理员 JWT 代替。生产跨网使用 TLS；NATS 配置 Broker 认证和 subject 权限，禁止未授权读取/发布会话 subject。示例的共享密码适合本地演示，生产应配置机器账号和权限。
 

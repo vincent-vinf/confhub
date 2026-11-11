@@ -18,18 +18,22 @@ type ConnectionStatus struct {
 	Error     string `json:"error,omitempty"`
 }
 type Worker struct {
-	mirror        Mirror
-	dial          Dial
-	leaseDuration time.Duration
-	mu            sync.Mutex
-	status        ConnectionStatus
+	mirror          Mirror
+	dial            Dial
+	leaseDuration   time.Duration
+	standbyInterval time.Duration
+	mu              sync.Mutex
+	status          ConnectionStatus
 }
 
-func NewWorker(mirror Mirror, dial Dial, leaseDuration time.Duration) *Worker {
+func NewWorker(mirror Mirror, dial Dial, leaseDuration, standbyInterval time.Duration) *Worker {
 	if leaseDuration <= 0 {
 		leaseDuration = 30 * time.Second
 	}
-	return &Worker{mirror: mirror, dial: dial, leaseDuration: leaseDuration}
+	if standbyInterval <= 0 {
+		standbyInterval = 5 * time.Second
+	}
+	return &Worker{mirror: mirror, dial: dial, leaseDuration: leaseDuration, standbyInterval: standbyInterval}
 }
 func (w *Worker) Status() ConnectionStatus          { w.mu.Lock(); defer w.mu.Unlock(); return w.status }
 func (w *Worker) update(fn func(*ConnectionStatus)) { w.mu.Lock(); defer w.mu.Unlock(); fn(&w.status) }
@@ -76,7 +80,7 @@ func (w *Worker) Run(ctx context.Context) {
 			// instance owns synchronization. Do not retain its old session error.
 			w.update(func(s *ConnectionStatus) { s.Error = "" })
 		}
-		if !delay(ctx, 250*time.Millisecond) {
+		if !delay(ctx, w.standbyInterval) {
 			return
 		}
 	}

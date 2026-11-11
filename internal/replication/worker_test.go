@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/vincent-vinf/confhub/internal/replication"
@@ -34,12 +35,63 @@ func (m *standbyMirror) AcquireMirrorLease(ctx context.Context, _ string, _ time
 	}
 }
 
+func TestWorkerStandbyIntervalAndCancellation(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		interval, want time.Duration
+	}{
+		{"default", 0, 5 * time.Second},
+		{"configured", 2 * time.Second, 2 * time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				mirror := &standbyMirror{attempts: make(chan chan error)}
+				worker := replication.NewWorker(mirror, func(context.Context) (replication.Conn, error) {
+					t.Error("standby must not connect to cloud")
+					return nil, errors.New("unexpected dial")
+				}, 30*time.Second, tc.interval)
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				done := make(chan struct{})
+				go func() { defer close(done); worker.Run(ctx) }()
+				// Startup checks immediately; subsequent checks wait the configured interval.
+				result := <-mirror.attempts
+				result <- nil
+				synctest.Wait()
+				time.Sleep(tc.want - time.Nanosecond)
+				synctest.Wait()
+				select {
+				case <-mirror.attempts:
+					t.Fatal("lease check ran before the standby interval elapsed")
+				default:
+				}
+				time.Sleep(time.Nanosecond)
+				synctest.Wait()
+				select {
+				case result = <-mirror.attempts:
+				case <-time.After(time.Nanosecond):
+					t.Fatal("lease check did not run at the configured interval")
+				}
+				result <- nil
+				synctest.Wait()
+				cancel()
+				synctest.Wait()
+				select {
+				case <-done:
+				default:
+					t.Fatal("cancellation did not interrupt the standby wait")
+				}
+			})
+		})
+	}
+}
+
 func TestWorkerStandbyStorageRecovery(t *testing.T) {
 	mirror := &standbyMirror{attempts: make(chan chan error)}
 	worker := replication.NewWorker(mirror, func(context.Context) (replication.Conn, error) {
 		t.Error("standby must not connect to cloud")
 		return nil, errors.New("unexpected dial")
-	}, time.Second)
+	}, time.Second, time.Millisecond)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	done := make(chan struct{})
@@ -176,7 +228,7 @@ func testWorkerRetriesRebuildGuard(t *testing.T, loseLease bool) {
 		}()
 		return b, nil
 	}
-	worker := replication.NewWorker(mirror, dial, 90*time.Millisecond)
+	worker := replication.NewWorker(mirror, dial, 90*time.Millisecond, 250*time.Millisecond)
 	done := make(chan struct{})
 	go func() { defer close(done); worker.Run(ctx) }()
 	defer func() { cancel(); <-done }()

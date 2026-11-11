@@ -68,7 +68,7 @@ func TestObservedSourceRollbackRequiresRebuildAcrossWorkerRestart(t *testing.T) 
 	}
 	start := func(store *storage.Store) (*replication.Worker, func()) {
 		workerCtx, stop := context.WithCancel(ctx)
-		worker := replication.NewWorker(store, dial, 3*time.Second)
+		worker := replication.NewWorker(store, dial, 3*time.Second, 250*time.Millisecond)
 		done := make(chan struct{})
 		go func() { defer close(done); worker.Run(workerCtx) }()
 		return worker, func() { stop(); <-done }

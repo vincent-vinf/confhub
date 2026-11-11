@@ -35,10 +35,10 @@ type Hub struct {
 
 func New(source Source, options Options) *Hub {
 	if options.PollInterval <= 0 {
-		options.PollInterval = 100 * time.Millisecond
+		options.PollInterval = time.Second
 	}
 	if options.FailureTimeout <= 0 {
-		options.FailureTimeout = 2 * time.Second
+		options.FailureTimeout = 10 * time.Second
 	}
 	// A longer poll period cannot support the requested outage deadline.
 	if options.FailureTimeout < 2*time.Millisecond {

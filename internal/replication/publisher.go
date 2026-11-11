@@ -23,7 +23,7 @@ type Publisher struct {
 
 func NewPublisher(source Source, poll time.Duration) *Publisher {
 	if poll <= 0 {
-		poll = 100 * time.Millisecond
+		poll = time.Second
 	}
 	return &Publisher{source: source, poll: poll, changed: make(chan struct{})}
 }

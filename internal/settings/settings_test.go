@@ -27,7 +27,7 @@ func TestDefaultsAndFlagPrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.PollInterval != 100*time.Millisecond || s.HistoryLimit != 100 || s.CacheBytes != 64<<20 || s.CookieSecure || s.JWTExpiry != 2*time.Hour {
+	if s.PollInterval != time.Second || s.SyncFailureTimeout != 10*time.Second || s.ReplicationStandbyInterval != 5*time.Second || s.HistoryLimit != 100 || s.CacheBytes != 64<<20 || s.CookieSecure || s.JWTExpiry != 2*time.Hour {
 		t.Fatalf("unexpected defaults: %+v", s)
 	}
 	s, err = settings.Parse([]string{"--listen", ":9090", "--history-limit", "3", "--cookie-secure", "false", "--poll-interval", "20ms"}, environment(map[string]string{"CONFHUB_LISTEN": ":8081", "CONFHUB_HISTORY_LIMIT": "bad", "CONFHUB_COOKIE_SECURE": "true", "CONFHUB_POLL_INTERVAL": "50ms"}))
@@ -41,7 +41,8 @@ func TestDefaultsAndFlagPrecedence(t *testing.T) {
 
 func TestInvalidEnvironmentAndArgumentsAreRejected(t *testing.T) {
 	for _, tc := range []struct{ name, value string }{
-		{"POLL_INTERVAL", "invalid"}, {"POLL_INTERVAL", "0"}, {"POLL_INTERVAL", "1us"}, {"POLL_INTERVAL", "2s"},
+		{"POLL_INTERVAL", "invalid"}, {"POLL_INTERVAL", "0"}, {"POLL_INTERVAL", "1us"}, {"POLL_INTERVAL", "6s"},
+		{"REPLICATION_STANDBY_INTERVAL", "invalid"}, {"REPLICATION_STANDBY_INTERVAL", "0s"}, {"REPLICATION_STANDBY_INTERVAL", "-1s"},
 		{"SYNC_FAILURE_TIMEOUT", "1ms"}, {"JWT_EXPIRY", "-1s"}, {"CLEANUP_INTERVAL", "0s"}, {"EVENT_RETENTION", "oops"},
 		{"CACHE_BYTES", "-1"}, {"CACHE_BYTES", "bad"}, {"HISTORY_LIMIT", "0"}, {"HISTORY_LIMIT", "bad"},
 		{"COOKIE_SECURE", "maybe"}, {"DATABASE", "sqlite"}, {"JWT_SECRET", "short"},
@@ -55,6 +56,31 @@ func TestInvalidEnvironmentAndArgumentsAreRejected(t *testing.T) {
 	for _, args := range [][]string{{"--unknown"}, {"extra"}, {"--dsn", ""}} {
 		if _, err := settings.Parse(args, environment(nil)); err == nil {
 			t.Fatalf("accepted %q", args)
+		}
+	}
+}
+
+func TestStandbyIntervalEnvironmentAndFlagPrecedence(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		env  string
+		args []string
+		want time.Duration
+	}{
+		{"environment", "3s", nil, 3 * time.Second},
+		{"flag overrides environment", "3s", []string{"--replication-standby-interval", "2s"}, 2 * time.Second},
+		{"flag overrides invalid environment", "invalid", []string{"--replication-standby-interval", "2s"}, 2 * time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, err := settings.Parse(tc.args, environment(map[string]string{"CONFHUB_REPLICATION_STANDBY_INTERVAL": tc.env}))
+			if err != nil || s.ReplicationStandbyInterval != tc.want {
+				t.Fatalf("interval=%v, want %v; err=%v", s.ReplicationStandbyInterval, tc.want, err)
+			}
+		})
+	}
+	for _, value := range []string{"invalid", "0s", "-1s"} {
+		if _, err := settings.Parse([]string{"--replication-standby-interval", value}, environment(nil)); err == nil {
+			t.Fatalf("accepted invalid standby interval %q", value)
 		}
 	}
 }

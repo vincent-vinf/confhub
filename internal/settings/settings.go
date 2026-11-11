@@ -20,7 +20,7 @@ type Settings struct {
 	CookieSecure                                                                     bool
 	Migrate                                                                          bool
 	Role, ReplicationTransport, ReplicationURL, ReplicationToken, ReplicationSubject string
-	ReplicationLease                                                                 time.Duration
+	ReplicationLease, ReplicationStandbyInterval                                     time.Duration
 	ReadOnly                                                                         bool
 }
 
@@ -51,10 +51,11 @@ func Parse(args []string, getenv func(string) string) (Settings, error) {
 	// than silently replaced by defaults.
 	values := map[string]*string{}
 	for _, v := range []struct{ name, key, def string }{
-		{"poll-interval", "POLL_INTERVAL", "100ms"}, {"sync-failure-timeout", "SYNC_FAILURE_TIMEOUT", "2s"},
+		{"poll-interval", "POLL_INTERVAL", "1s"}, {"sync-failure-timeout", "SYNC_FAILURE_TIMEOUT", "10s"},
 		{"jwt-expiry", "JWT_EXPIRY", "2h"}, {"cleanup-interval", "CLEANUP_INTERVAL", "1m"}, {"event-retention", "EVENT_RETENTION", "24h"},
 		{"cache-bytes", "CACHE_BYTES", "67108864"}, {"history-limit", "HISTORY_LIMIT", "100"}, {"cookie-secure", "COOKIE_SECURE", "false"},
 		{"replication-lease", "REPLICATION_LEASE", "30s"},
+		{"replication-standby-interval", "REPLICATION_STANDBY_INTERVAL", "5s"},
 	} {
 		p := new(string)
 		f.StringVar(p, v.name, env(v.key, v.def), v.key)
@@ -82,7 +83,7 @@ func Parse(args []string, getenv func(string) string) (Settings, error) {
 	if f.NArg() != 0 {
 		return s, fmt.Errorf("unexpected argument %q", f.Arg(0))
 	}
-	for name, p := range map[string]*time.Duration{"poll-interval": &s.PollInterval, "sync-failure-timeout": &s.SyncFailureTimeout, "jwt-expiry": &s.JWTExpiry, "cleanup-interval": &s.CleanupInterval, "event-retention": &s.EventRetention, "replication-lease": &s.ReplicationLease} {
+	for name, p := range map[string]*time.Duration{"poll-interval": &s.PollInterval, "sync-failure-timeout": &s.SyncFailureTimeout, "jwt-expiry": &s.JWTExpiry, "cleanup-interval": &s.CleanupInterval, "event-retention": &s.EventRetention, "replication-lease": &s.ReplicationLease, "replication-standby-interval": &s.ReplicationStandbyInterval} {
 		v, err := time.ParseDuration(*values[name])
 		if err != nil || v <= 0 {
 			return s, fmt.Errorf("%s must be a positive duration", name)

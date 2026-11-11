@@ -47,8 +47,8 @@ flag 优先于同名环境变量。不读取启动配置文件。轮询间隔至
 | `--cookie-secure` | `COOKIE_SECURE` | `false`，HTTPS 部署设置 true |
 | `--read-only` | `READ_ONLY` | `false`，启用后禁止数据库写入 |
 | `--static-dir` | `STATIC_DIR` | `/app/frontend` |
-| `--poll-interval` | `POLL_INTERVAL` | `100ms` |
-| `--sync-failure-timeout` | `SYNC_FAILURE_TIMEOUT` | `2s` |
+| `--poll-interval` | `POLL_INTERVAL` | `1s`，配置通知与云端复制水位共用 |
+| `--sync-failure-timeout` | `SYNC_FAILURE_TIMEOUT` | `10s` |
 | `--cache-bytes` | `CACHE_BYTES` | `67108864`（64 MiB） |
 | `--history-limit` | `HISTORY_LIMIT` | `100`，仅主历史；beta 独立保留 |
 | `--cleanup-interval` | `CLEANUP_INTERVAL` | `1m`，每次最多清理 256 条历史/事件 |

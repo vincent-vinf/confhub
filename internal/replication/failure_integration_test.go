@@ -207,7 +207,7 @@ func TestSlowFencedImportDoesNotCancelItsOwnLeaseRenewal(t *testing.T) {
 		sessions.Add(1)
 		go func() { _ = serve(ctx, a, cloud, time.Millisecond) }()
 		return b, nil
-	}, 3*time.Second)
+	}, 3*time.Second, 250*time.Millisecond)
 	done := make(chan struct{})
 	go func() { defer close(done); worker.Run(ctx) }()
 	defer func() { cancel(); <-done }()
