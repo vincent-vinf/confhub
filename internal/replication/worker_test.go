@@ -14,6 +14,76 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+type standbyMirror struct {
+	replication.Mirror
+	attempts chan chan error
+}
+
+func (m *standbyMirror) AcquireMirrorLease(ctx context.Context, _ string, _ time.Duration) (replication.Lease, bool, error) {
+	result := make(chan error)
+	select {
+	case m.attempts <- result:
+	case <-ctx.Done():
+		return replication.Lease{}, false, ctx.Err()
+	}
+	select {
+	case err := <-result:
+		return replication.Lease{}, false, err
+	case <-ctx.Done():
+		return replication.Lease{}, false, ctx.Err()
+	}
+}
+
+func TestWorkerStandbyStorageRecovery(t *testing.T) {
+	mirror := &standbyMirror{attempts: make(chan chan error)}
+	worker := replication.NewWorker(mirror, func(context.Context) (replication.Conn, error) {
+		t.Error("standby must not connect to cloud")
+		return nil, errors.New("unexpected dial")
+	}, time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	done := make(chan struct{})
+	go func() { defer close(done); worker.Run(ctx) }()
+	defer func() { cancel(); <-done }()
+	nextAttempt := func() chan error {
+		t.Helper()
+		select {
+		case result := <-mirror.attempts:
+			return result
+		case <-ctx.Done():
+			t.Fatal("worker did not retry lease acquisition")
+			return nil
+		}
+	}
+	result := nextAttempt()
+	storageFailure := errors.New("temporary database failure")
+	for _, step := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"storage failure", storageFailure, "local_storage_unavailable"},
+		{"ongoing failure", storageFailure, "local_storage_unavailable"},
+		{"recovered as standby", nil, ""},
+		{"remains standby", nil, ""},
+		{"storage fails again", storageFailure, "local_storage_unavailable"},
+		{"rebuild required", replication.ErrSourceChanged, "source_changed_rebuild_required"},
+		{"rebuild still required", replication.ErrSourceChanged, "source_changed_rebuild_required"},
+	} {
+		select {
+		case result <- step.err:
+		case <-ctx.Done():
+			t.Fatal("lease acquisition timed out")
+		}
+		// The next attempt starts only after the previous status was published.
+		result = nextAttempt()
+		status := worker.Status()
+		if status.Active || status.Connected || status.Error != step.want {
+			t.Fatalf("%s: got %+v, want inactive standby with error %q", step.name, status, step.want)
+		}
+	}
+}
+
 type failingGuardMirror struct {
 	mu                  sync.Mutex
 	writes              int

@@ -71,6 +71,10 @@ func (w *Worker) Run(ctx context.Context) {
 					s.Error = "source_changed_rebuild_required"
 				}
 			})
+		} else if !rebuildRequired {
+			// A healthy lease check also confirms storage recovery when another
+			// instance owns synchronization. Do not retain its old session error.
+			w.update(func(s *ConnectionStatus) { s.Error = "" })
 		}
 		if !delay(ctx, 250*time.Millisecond) {
 			return
