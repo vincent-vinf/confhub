@@ -58,7 +58,7 @@ export function Empty({
       <span className="empty-icon">
         <FileText size={28} aria-hidden="true" />
       </span>
-      <h3>{title}</h3>
+      <h2>{title}</h2>
       {description && <p>{description}</p>}
       {action}
     </div>

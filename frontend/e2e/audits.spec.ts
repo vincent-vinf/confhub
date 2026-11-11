@@ -1,3 +1,4 @@
+import { setDisplayMode } from './appearance'
 import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import type { ConfigState } from '../src/lib/types'
@@ -111,7 +112,7 @@ test('审计真实操作、组合筛选、详情及游标分页', async ({ page 
   await expect(page.getByText('第 1 页', { exact: true })).toBeVisible()
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([])
   await page.screenshot({ path: testInfo.outputPath('audits-light.png') })
-  await page.getByRole('button', { name: '切换深色主题' }).click()
+  await setDisplayMode(page, 'dark')
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
   await page.setViewportSize({ width: 375, height: 812 })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(

@@ -1,3 +1,4 @@
+import { setDisplayMode } from './appearance'
 import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 
@@ -84,7 +85,7 @@ test('批量选择、取消、删除确认以及明暗窄屏可访问性', async
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.setViewportSize({ width: 375, height: 812 })
   for (const dark of [false, true]) {
-    if (dark) await page.getByRole('button', { name: '切换深色主题' }).click()
+    if (dark) await setDisplayMode(page, 'dark')
     await page.getByRole('button', { name: '删除配置', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: '批量删除配置', exact: true })
     await expect(dialog.getByRole('button', { name: '确认删除', exact: true })).toBeDisabled()

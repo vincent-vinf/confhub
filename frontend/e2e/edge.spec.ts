@@ -1,3 +1,4 @@
+import { setDisplayMode } from './appearance'
 import { expect, test } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 
@@ -143,7 +144,7 @@ test('边缘登录后只读查看镜像、beta、规则、客户端及同步状�
     (await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze()).violations,
   ).toEqual([])
   await page.screenshot({ path: '../test-results/edge-console/sync-light.png', fullPage: true })
-  await page.getByRole('button', { name: '切换深色主题' }).click()
+  await setDisplayMode(page, 'dark')
   await page.setViewportSize({ width: 390, height: 844 })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   expect(

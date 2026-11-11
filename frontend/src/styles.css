@@ -401,7 +401,7 @@ a.button:hover {
   border-radius: 13px;
   margin: 0 auto 18px;
 }
-.empty h3 {
+.empty h2 {
   color: var(--text);
   margin-bottom: 7px;
   font-size: 17px;
@@ -468,8 +468,8 @@ a.button:hover {
   border-radius: 9px;
 }
 .sidebar .brand-mark {
-  background: #7cd8b9;
-  color: #122c21;
+  background: var(--nav-brand);
+  color: var(--on-nav-brand);
 }
 .nav-section-label {
   color: var(--nav-muted);
@@ -493,7 +493,7 @@ a.button:hover {
   font-size: 14px;
 }
 .sidebar nav a:hover {
-  background: #1c303c;
+  background: var(--nav-hover);
   text-decoration: none;
   color: var(--nav-text);
 }
@@ -1741,8 +1741,8 @@ th[aria-sort='descending'] .table-sort {
   padding: 0;
 }
 .login-story .brand-mark {
-  background: #7cd8b9;
-  color: #122c21;
+  background: var(--nav-brand);
+  color: var(--on-nav-brand);
 }
 .login-copy {
   margin: auto 0;
@@ -1770,11 +1770,11 @@ th[aria-sort='descending'] .table-sort {
   inset: auto -160px -280px auto;
   width: 540px;
   height: 540px;
-  border: 1px solid #28404d;
+  border: 1px solid var(--nav-border);
   border-radius: 50%;
   box-shadow:
-    0 0 0 70px #192c37,
-    0 0 0 71px #28404d;
+    0 0 0 70px var(--nav-hover),
+    0 0 0 71px var(--nav-border);
   opacity: 0.6;
 }
 .login-panel {

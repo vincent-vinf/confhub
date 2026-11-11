@@ -1,3 +1,4 @@
+import { setDisplayMode } from './appearance'
 import { expect, test } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 
@@ -114,7 +115,7 @@ test('只读实例登录、历史与灰度试算、自动刷新和写入限制',
   expect(
     (await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze()).violations,
   ).toEqual([])
-  await page.getByRole('button', { name: '切换深色主题' }).click()
+  await setDisplayMode(page, 'dark')
   await page.setViewportSize({ width: 375, height: 812 })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   expect(

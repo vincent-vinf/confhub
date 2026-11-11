@@ -17,36 +17,7 @@ import { allows } from '../lib/permissions'
 import type { User } from '../lib/types'
 import { Button, Modal } from './ui'
 
-type Theme = 'light' | 'dark'
-const ThemeContext = createContext<{ theme: Theme; toggle: () => void }>({
-  theme: 'light',
-  toggle: () => {},
-})
-export const useTheme = () => useContext(ThemeContext)
-export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<Theme>(() => {
-    try {
-      return localStorage.getItem('confhub.theme') === 'dark' ? 'dark' : 'light'
-    } catch {
-      return 'light'
-    }
-  })
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme
-    try {
-      localStorage.setItem('confhub.theme', theme)
-    } catch {
-      /* The preference is optional. */
-    }
-  }, [theme])
-  return (
-    <ThemeContext.Provider
-      value={{ theme, toggle: () => setTheme((t) => (t === 'light' ? 'dark' : 'light')) }}
-    >
-      {children}
-    </ThemeContext.Provider>
-  )
-}
+export { ThemeProvider, useTheme } from './theme-provider'
 const ToastContext = createContext<(message: string) => void>(() => {})
 export const useToast = () => useContext(ToastContext)
 export function ToastProvider({ children }: { children: ReactNode }) {

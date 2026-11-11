@@ -4,6 +4,27 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#12212b" />
+    <script>
+      // Apply stored preferences before the application and styles render.
+      ;(() => {
+        const root = document.documentElement
+        let mode = 'system'
+        let palette = 'pine'
+        try {
+          const storedMode = localStorage.getItem('confhub.theme')
+          if (storedMode === 'light' || storedMode === 'dark') mode = storedMode
+          const storedPalette = localStorage.getItem('confhub.palette')
+          if (['pine', 'ocean', 'slate', 'sand'].includes(storedPalette)) palette = storedPalette
+        } catch {}
+        root.dataset.theme =
+          mode === 'system'
+            ? window.matchMedia('(prefers-color-scheme: dark)').matches
+              ? 'dark'
+              : 'light'
+            : mode
+        root.dataset.palette = palette
+      })()
+    </script>
     <meta name="description" content="ConfHub 配置中心管理控制台" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>ConfHub · 配置中心</title>

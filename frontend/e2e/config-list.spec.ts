@@ -1,3 +1,4 @@
+import { setDisplayMode } from './appearance'
 import { test, expect } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 
@@ -90,8 +91,7 @@ test('全部分组、全局排序、分页和跨分组导出，兼容键盘与�
     ['dark', { width: 812, height: 375 }],
   ] as const) {
     await page.setViewportSize(viewport)
-    if (theme === 'dark' && (await page.getByRole('button', { name: '切换深色主题' }).count()))
-      await page.getByRole('button', { name: '切换深色主题' }).click()
+    if (theme === 'dark') await setDisplayMode(page, 'dark')
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([])
     await expect
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))

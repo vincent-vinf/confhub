@@ -22,6 +22,7 @@ import '@fontsource/ibm-plex-sans/latin-500.css'
 import '@fontsource/ibm-plex-sans/latin-600.css'
 import '@fontsource/jetbrains-mono/latin-400.css'
 import './styles.css'
+import './appearance.css'
 
 const ConfigListPage = lazy(() =>
   import('./pages/config-list').then((module) => ({ default: module.ConfigListPage })),

@@ -10,8 +10,6 @@ import {
   Files,
   FolderTree,
   Settings2,
-  Moon,
-  Sun,
   Menu,
   ChevronRight,
   LogOut,
@@ -19,7 +17,8 @@ import {
 } from 'lucide-react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
-import { useAuth, useTheme, usePermission } from './providers'
+import { useAuth, usePermission } from './providers'
+import { AppearanceSettings } from './appearance-settings'
 import { Badge, Button, ErrorNotice, Loading } from './ui'
 import { LoginPage, Reauthenticate } from '../pages/login'
 
@@ -50,7 +49,6 @@ function Layout() {
   const [menu, setMenu] = useState(false)
   const location = useLocation()
   const navigate = useNavigate()
-  const { theme, toggle } = useTheme()
   const { user } = useAuth()
   const readOnly = !!user?.read_only
   const edge = user?.role === 'edge'
@@ -207,18 +205,7 @@ function Layout() {
           </div>
           <div className="topbar-actions">
             {edge ? <Badge>边缘 · 只读</Badge> : readOnly && <Badge>只读模式</Badge>}
-            <Button
-              variant="ghost"
-              className="icon-button"
-              aria-label={theme === 'light' ? '切换深色主题' : '切换浅色主题'}
-              onClick={toggle}
-            >
-              {theme === 'light' ? (
-                <Moon size={18} aria-hidden="true" />
-              ) : (
-                <Sun size={18} aria-hidden="true" />
-              )}
-            </Button>
+            <AppearanceSettings />
             <span className="avatar" aria-hidden="true">
               {user?.username[0]?.toUpperCase()}
             </span>

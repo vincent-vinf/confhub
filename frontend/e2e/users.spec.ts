@@ -1,3 +1,4 @@
+import { setDisplayMode } from './appearance'
 import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 const origin = 'http://127.0.0.1:18080'
@@ -211,7 +212,7 @@ test('无授权用户可登录、保护 admin 及深色授权弹窗', async ({ p
     .filter({ has: page.getByRole('cell', { name: 'admin', exact: true }) })
   await expect(adminRow.getByRole('button', { name: '删除', exact: true })).not.toBeVisible()
   await expect(adminRow.getByRole('button', { name: '禁用', exact: true })).not.toBeVisible()
-  await page.getByRole('button', { name: '切换深色主题' }).click()
+  await setDisplayMode(page, 'dark')
   await adminRow.getByRole('button', { name: '编辑权限', exact: true }).click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('checkbox', { name: '启用账号', exact: true })).toBeDisabled()

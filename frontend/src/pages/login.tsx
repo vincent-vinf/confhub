@@ -3,6 +3,7 @@ import { ArrowRight, Layers3, LockKeyhole } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth, useNavigationPermit } from '../components/providers'
 import { Button, ErrorNotice, Modal } from '../components/ui'
+import { AppearanceSettings } from '../components/appearance-settings'
 
 function LoginForm({ expired = false }: { expired?: boolean }) {
   const auth = useAuth()
@@ -85,6 +86,9 @@ export function LoginPage() {
         <small>ConfHub · 轻量配置中心</small>
       </section>
       <section className="login-panel">
+        <div className="login-appearance">
+          <AppearanceSettings />
+        </div>
         <div className="login-card">
           <div className="login-lock">
             <LockKeyhole size={22} aria-hidden="true" />

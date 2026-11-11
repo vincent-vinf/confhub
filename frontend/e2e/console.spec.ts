@@ -1,3 +1,4 @@
+import { setDisplayMode } from './appearance'
 import { test, expect, type Page, type APIRequestContext } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 
@@ -161,7 +162,7 @@ test('回退固定版本标识、明暗窄屏与冲突后重新确认', async ({
   await page.screenshot({ path: '../docs/images/frontend/rollback-light.png', fullPage: true })
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await dialog.getByRole('button', { name: '返回编辑', exact: true }).click()
-  await page.getByRole('button', { name: '切换深色主题' }).click()
+  await setDisplayMode(page, 'dark')
   await page.getByRole('button', { name: '回退到 v1', exact: true }).click()
   for (const viewport of [
     { width: 375, height: 812 },
@@ -253,7 +254,7 @@ test('共享 beta 原位编辑、前后 diff、主历史、转全量及关闭重
     [4, 5],
   ]) {
     if (after === 5) {
-      await page.getByRole('button', { name: '切换深色主题' }).click()
+      await setDisplayMode(page, 'dark')
       await page.setViewportSize({ width: 375, height: 812 })
     }
     await edit(page, `{"v":${after}}`)
@@ -439,7 +440,7 @@ test('浅深主题、响应式、键盘导航与无障碍检查', async ({ page 
   await expect(page.getByRole('tab', { name: '版本历史' })).toBeFocused()
   await page.keyboard.press('Home')
   for (const dark of [false, true]) {
-    if (dark) await page.getByRole('button', { name: '切换深色主题' }).click()
+    if (dark) await setDisplayMode(page, 'dark')
     const results = await new AxeBuilder({ page })
       .withTags(['wcag2a', 'wcag2aa', 'wcag21aa'])
       .analyze()
@@ -869,7 +870,7 @@ test('在线客户端只读展示、筛选、标签补全与 IP 区间规则', a
     .toBeTruthy()
   await page.setViewportSize({ width: 375, height: 812 })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy()
-  await page.getByRole('button', { name: '切换深色主题' }).click()
+  await setDisplayMode(page, 'dark')
   await expect(page.getByRole('button', { name: '刷新', exact: true })).toHaveCSS(
     'background-color',
     'rgb(28, 43, 53)',
@@ -1098,7 +1099,7 @@ test('统一下拉菜单主题、键盘、长选项与弹窗内 Escape', async (
   await page.screenshot({ path: '../docs/images/frontend/select-light.png', fullPage: true })
   await page.keyboard.press('Escape')
   await expect(group).toBeFocused()
-  await page.getByRole('button', { name: '切换深色主题' }).click()
+  await setDisplayMode(page, 'dark')
   await group.click()
   await expect(list).toHaveCSS('background-color', 'rgb(28, 43, 53)')
   expect(
